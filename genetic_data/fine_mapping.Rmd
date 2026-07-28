@@ -1,0 +1,474 @@
+---
+title: "fine-maping"
+author: "justine_drouault"
+date: "2026-07-22"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r echo = FALSE}
+# rm(list = ls())
+# Q <- NULL
+```
+
+```{r,}
+date_today <- Sys.Date()
+date_today <- gsub("-", "", date_today)
+```
+
+```{r eval = F}
+install.packages(c(
+  "anyLib",
+  "data.table",
+  "dplyr",
+  "ggplot2",
+  "gridExtra",
+  "patchwork",
+  "plyr",
+  "reshape2",
+  "stringr", 
+  "forcats"
+))
+```
+
+```{r load packages, echo=TRUE, message=FALSE, results='hide'}
+library(anyLib)
+anyLib(c("data.table",
+  "dplyr",
+  "ggplot2",
+  "gridExtra",
+  "patchwork",
+  "plyr",
+  "reshape2",
+  "stringr", 
+  "forcats", 
+  "ggpubr"))
+```
+
+This demonstration of fine-mapping will be done with the CACTA-like transposable element (TE) located on ZmPR4 as its exact position is known. Therefore we work with 2369 and LH123hT as both background parents and CML277 and CML341 as donor parents as they lack the TE which provide a higher expression of photoperiod-sensitivity. 
+
+
+```{r get rp, dp, ZmPR list, echo=TRUE, message=T}
+
+ZmPR_list <- 4 
+rp_list <- c(1, 2) #"2369", "LH123Ht"
+dp_list <-  c(3, 4) #"CML277", "CML341"
+
+```
+
+# Get phenotypic data 
+
+Here we focus on slope of sensitivity (PS)
+
+```{r load data, echo=TRUE, message=T}
+
+groupA_NILs <- read.csv(paste0(genetic_data_save_path, "20240913Selected_NILs_after_filtration.csv"), header = T)
+haplotype_slope <- read.csv(paste0(source_path, "haplotype_slope_20240921.csv"), header = T)
+
+```
+
+We keep only the genotypes introgressed in ZmPR 4 region (targeted region) and no other introgression in the background, meaning we work with NILs belonging to group A
+
+```{r get the genotypes to work on}
+
+### here all this should be done before this script 
+
+geno_group <- group1_NILs  %>%
+  dplyr::mutate(rp = as.numeric(gsub(".*g[0-9]|i.*", "", entryid)),
+                dp = as.numeric(gsub(".*g|[0-9]i.*", "", entryid)),
+                qtl = as.numeric(gsub(".*q|g.*", "", entryid))) %>%
+  dplyr::filter(rp %in% rp_list) %>%
+  dplyr::filter(dp %in% dp_list) %>%
+  dplyr::filter(qtl %in% ZmPR_list) %>%
+  dplyr::filter(zmpr4_cacta == 1)
+
+phenotype_zmpr4 <- haplotype_slope %>%
+  dplyr::mutate(rp = as.numeric(gsub(".*g[0-9]|i.*", "", haplotype)),
+                dp = as.numeric(gsub(".*g|[0-9]i.*", "", haplotype)),
+                qtl = as.numeric(gsub(".*q|g.*", "", haplotype))) %>%
+  dplyr::rename(entryid2 = haplotype) %>%
+  dplyr::filter(rp %in% rp_list) %>%
+  dplyr::filter(dp %in% dp_list) %>%
+  dplyr::filter(qtl %in% ZmPR_list) %>%
+  dplyr::full_join(NILAS_newid) %>%
+  dplyr::mutate(id_new = as.factor(id_new), id_new = fct_rev(id_new)) %>%
+  dplyr::arrange(desc(id_new)) %>%
+  dplyr::filter(entryid2 %in% unique(haplotype_single_intro$entryid)) %>% ## keep only the NILs of group A
+  dplyr::mutate(
+    i = str_extract(entryid2, "i\\d+"),
+    i = str_extract(i, "\\d{2}"),
+    i = factor(
+      i,
+      levels = c(
+        "12",
+        "11",
+        "10",
+        "09",
+        "08",
+        "07",
+        "06",
+        "05",
+        "04",
+        "03",
+        "02",
+        "01"
+      )
+    ),
+    marker = ifelse(
+      entryid2 %in% candidate_gene_coordinate_sub$entryid,
+      "yes",
+      "no"
+    ),
+    marker = factor(marker, levels = c("no", "yes"))
+  )
+
+```
+
+We transform the estimates so they are all positive, for that we apply a linear transformation by adding the absolute value of the most negative estimates to the other estimates. 
+
+```{r}
+
+min_value <- abs(min(phenotype_zmpr4$Estimate, na.rm = T))
+
+phenotype_zmpr4 <- phenotype_zmpr4 %>%
+  # dplyr::select(entryid2, Estimate, marker, id_new) %>%
+  dplyr::rename(Sample  = entryid2) %>%
+  dplyr::group_by(Sample, marker) %>%
+  dplyr::mutate(
+    Estimate_transformed = Estimate + min_value,
+    Estimate_of_origin = ifelse(Estimate_transformed < min_value, 0, Estimate),
+    Addition = ifelse(Estimate < 0, min_value - abs(Estimate) , min_value),
+    Sample = as.factor(Sample)) %>%
+  tidyr::pivot_longer(c(Estimate_of_origin, Addition),
+                      names_to = "Type",
+                      values_to = "values") %>%
+  dplyr::arrange(desc(Estimate_transformed))
+
+pheno_tot <- sum(phenotype_slope$Estimate_transformed, na.rm = T)
+
+sample_order <- dput(levels(reorder(
+  phenotype_zmpr4$Sample,
+  desc(phenotype_zmpr4$Estimate_transformed)
+)))
+
+```
+
+```{r plot the phenotypic values}
+
+Q<- phenotype_zmpr4 %>% 
+    dplyr::mutate(
+    Sample = factor(Sample, levels = sample_order)
+  ) %>%
+  ggplot(aes(x = values , y = Sample, fill = Type)) +
+  geom_col( stat = "identity", position = "stack") +
+   scale_fill_manual(values = cbPalette) +
+      geom_errorbar(
+  data = dplyr::filter(phenotype_zmpr4, Type == "Estimate_of_origin"),
+  aes(
+    y = Sample,
+    xmin = values - Std..Error,
+    xmax = values + Std..Error
+  ),
+  width = 0.5,
+  colour = "black",
+  alpha = 0.5,
+  linewidth = 0.8
+) +
+  xlab("Transformed value of photoperiod sensitivity") + 
+      # geom_vline(aes(xintercept = -id_new+48+0.5), colour="grey", size=0.5) +
+      scale_alpha_manual(values = c(1, 0.5)) +
+      # xlab("Haplotype effect \n on photoperiod sensitivity") +
+      # ylab("NILAS") + 
+      # ggtitle("B") + 
+      theme(
+        # plot.background = element_blank()
+            ,legend.position = "right"
+            ,panel.grid.minor = element_blank()
+            ,panel.grid.major.x = element_blank()
+            ,panel.grid.major.y = element_blank() #
+            ,panel.background = element_blank()
+            ,plot.title = element_text(face="bold", vjust=1)
+            ,axis.title.x = element_text(size=14, vjust=1.5)
+            ,axis.text.x = element_text(size=14, angle=45, hjust=1, vjust=1)
+            ,axis.title.y = element_blank() #element_text(size=14, angle=0, hjust=1, vjust=1)
+            ,axis.text.y = element_text(size=14, angle=0, hjust=1, vjust=1, color = "white") 
+            ,axis.ticks.y = element_blank()
+            ,plot.margin = unit(c(0,0,0,0), "lines") 
+      )
+
+Q
+
+```
+
+# Genotype
+
+```{r load genotype data }
+
+calculation_file <- data1 %>%
+  dplyr::filter(Sample %in% unique(haplotype_single_intro$entryid)) %>%
+  dplyr::group_by(Sample) %>%
+  dplyr::distinct() %>%
+  dplyr::group_by(Sample, marker) %>%
+  dplyr::mutate(dim_interval = i.end - i.start)
+
+```
+
+## Fine map  
+
+```{r define interval number and interval size}
+
+Number_interval = 200
+Interval_size = (max(calculation_file$i.end, na.rm =T) - min(calculation_file$i.start, na.rm =T)) /Number_interval
+
+```
+
+```{r extract the begin and end base paire of each interval}
+
+begin <- min(data1$i.start,  na.rm = T)
+dataframe_interval  <- NULL 
+interval <- 1
+end <- 0
+while(end < max(data1$i.end, na.rm = T )){
+  end <-  begin + Interval_size
+  list <- cbind(begin, end, interval)
+  dataframe_interval <- rbind.data.frame(dataframe_interval, list)
+  begin <- end + 1
+  interval <- interval + 1
+}
+
+```
+
+```{r define the interval value}
+
+# Get mean size of segments in the targeted region of the NILs 
+mean_interval <- mean(calculation_file$dim_interval, na.rm =T)
+
+# Define in which the segment falls 
+dataset2 <- dataframe_interval
+interval_begin <- dataframe_interval$begin
+interval_end <- dataframe_interval$end
+dataset_final <- NULL
+
+dataset_to_return <- NULL
+table_for_fine_mapping <- do.call(rbind, lapply(split(calculation_file, as.factor(calculation_file$Sample)), function(x)
+  # x <- split(data2,as.factor(data2$Sample))[[1]]
+{
+  dataset_final <- NULL
+  a <- 1
+  for (i in 1:nrow(x)) {
+    # i <- 16
+    dataset1 <- x[i, ]
+    snp_start <- x$i.start[i]
+    snp_end <- x$i.end[i]
+    interval_begin <- dataset2$begin[dataset2$interval == a]
+    interval_end <- dataset2$end[dataset2$interval == a]
+    if (snp_start < interval_end & snp_end > interval_end) {
+      while (snp_end > interval_end) {
+        print(a)
+        a <- a + 1
+        interval_begin <- dataset2$begin[dataset2$interval == a]
+        interval_end <- dataset2$end[dataset2$interval == a]
+        dataset1[, "interval"] <- a
+        dataset_final <- rbind.data.frame(dataset_final, dataset1)
+      }
+      
+  }else if (snp_start > interval_end) {
+      while (snp_start > interval_end) {
+        a <- a + 1
+        interval_begin <- dataset2$begin[dataset2$interval == a]
+        interval_end <- dataset2$end[dataset2$interval == a]
+      }
+      
+      dataset1[, "interval"] <- a
+      dataset_final <- rbind.data.frame(dataset_final, dataset1)
+      
+    } else {
+      dataset1[, "interval"] <- a
+      dataset_final <- rbind.data.frame(dataset_final, dataset1)
+    }
+    dataset_final
+  }
+  dataset_to_return <- rbind.data.frame(dataset_to_return, dataset_final)
+  
+}))
+
+## calculate the value of the interval 
+table_for_fine_mapping_interval_content <- table_for_fine_mapping %>%
+  dplyr::group_by(Sample, interval) %>%
+  dplyr::mutate(RP = sum(geno == "RP")/n(),
+                DP = 1 - RP) %>%
+  dplyr::select(Sample, RP, DP, interval) %>%
+  dplyr::distinct() 
+
+table_for_fine_mapping_interval_value <- table_for_fine_mapping_interval_content %>%
+  dplyr::filter(Sample %in% unique(haplotype_single_intro$entryid))%>%
+  dplyr::full_join(phenotype_slope[,c("Sample", "Estimate_transformed")]) %>%
+  dplyr::group_by(interval , Sample) %>%
+  dplyr::mutate(value_inerval = DP * Estimate_transformed)%>%
+  dplyr::group_by(interval) %>%
+  dplyr::summarise(value_inerval_tot = sum(value_inerval, na.rm = T)) %>%
+  dplyr::mutate(value_inerval_tot  = value_inerval_tot/pheno_tot)
+  
+```
+
+
+```{r plot genotype matrix}
+
+cols.4 <- c("NA"="#F0E442", "DP"="#0072B2", "Het"="#CC79A7", "RP"="#999999")
+
+cacta_fine_map <- calculation_file %>%
+  dplyr::filter(Sample %in% haplotype_single_intro$entryid) %>%
+  dplyr::mutate(Sample = factor(Sample, levels = sample_order)) %>%
+  dplyr::arrange(Sample)%>%
+  dplyr::group_by(Sample) %>%
+  dplyr::mutate(id = cur_group_id())  %>%
+  ggplot() +
+  geom_rect(aes(
+    xmin = i.start,
+    xmax = i.end,
+    ymin = id - 0.5,
+  ymax = id + 0.5,
+    fill = geno
+  ),
+  size = 8) +
+  geom_hline(aes(yintercept =  id), color = "black") +
+  geom_vline(xintercept = 94430850, color = "red") +
+  geom_vline(xintercept = 94433495, color = "red") +
+  # geom_vline(
+  #   xintercept = seq(
+  #     min(dataframe_interval$begin),
+  #     max(dataframe_interval$end),
+  #     by = Interval_size
+  #   ),
+  #   # linetype = "dashed",
+  #   colour = "lightgrey"
+  # ) +
+  ggtitle("A") +
+  xlab("Target Interval\n(quantile positions, bp)") +
+  ylab("") +
+  scale_fill_manual(
+    name = "",
+    values = cols.4,
+    breaks = c("NA", "Het", "DP", "RP"),
+    limits = c("NA", "Het", "DP", "RP"),
+    labels = c("NA", "Het", "DP", "RP")
+  ) +
+  scale_y_continuous(breaks  = c(2:(length(unique(calculation_file$Sample))+1)),
+                   labels = sample_order) +
+  theme(
+    plot.background = element_blank()
+    ,
+    legend.position = "none"
+    #,legend.position = "top"
+    #,legend.direction="vertical"
+    #,legend.key.size = unit(0.5, "cm")
+    #,legend.text = element_text(size = 10)
+    #,aspect.ratio = 1
+    #,panel.grid.major = element_blank()
+    ,
+    panel.grid.minor = element_blank()
+    ,
+    panel.grid.major.x = element_blank()
+    ,
+    panel.grid.major.y = element_blank()#element_line(colour="black", linetype = "dashed")        # ,panel.border = element_rect(colour="grey", linewidth = 0.5, fill=NA)
+    ,
+    panel.background = element_blank()
+    ,
+    plot.title = element_text(face = "bold", vjust = 1)
+    ,
+    axis.title.x = element_text(size = 14, vjust = 1.5)
+    ,
+    axis.text.x = element_text(
+      size = 14,
+      angle = 0,
+      hjust = 1,
+      vjust = 1
+    )
+    ,
+    axis.title.y = element_text(
+      size = 14,
+      angle = 0,
+      hjust = 1,
+      vjust = 1
+    )
+    ,
+    axis.text.y = element_text(
+      size = 10,
+      hjust = 1,
+      vjust = 1
+    )
+    #top, right, bottom, left
+    ,
+    unit(c(0,0,0,0), "lines")
+  )
+
+
+cacta_fine_map
+
+```
+
+```{r}
+
+interval_value_plot <- table_for_fine_mapping_interval_value %>%
+  ggplot(aes( x= interval, y =  value_inerval_tot)) +
+  geom_point() + 
+  geom_vline(xintercept = 139, color = "red") +
+  ylab("Value of the interval") +
+  theme(
+    # plot.background = element_blank()
+    ,
+    legend.position = "none"
+    #,legend.position = "top"
+    #,legend.direction="vertical"
+    #,legend.key.size = unit(0.5, "cm")
+    #,legend.text = element_text(size = 10)
+    #,aspect.ratio = 1
+    ,panel.grid.major = element_line(size=.1, color="black")
+    ,
+    panel.grid.minor = element_line( size=.1, color="black" )
+    ,
+    # panel.grid.major.x = element_blank()
+    ,
+    # panel.grid.major.y = element_blank()#element_line(colour="black", linetype = "dashed")        # ,panel.border = element_rect(colour="grey", linewidth = 0.5, fill=NA)
+    ,
+    panel.background = element_blank()
+    ,
+    plot.title = element_text(face = "bold", vjust = 1)
+    ,
+    axis.title.x = element_text(size = 14, vjust = 1.5)
+    ,
+    axis.text.x = element_text(
+      size = 14,
+      angle = 0,
+      hjust = 1,
+      vjust = 1
+    )
+    ,
+    axis.title.y = element_text(
+      size = 14,
+      angle = 90,
+      hjust = 1,
+      vjust = 1
+    )
+    ,
+    axis.text.y = element_text(
+      size = 10,
+      hjust = 1,
+      vjust = 1
+    )
+    #top, right, bottom, left
+    ,
+    plot.margin = unit(c(0.1, 0.01, 1, 0.01), "cm")
+  )
+
+
+```
+
+```{r}
+
+pdf(paste(directory, group, "/", group, "_ZmPR", ZmPR, "_", format(Sys.time(), "%d%m%y"), ".pdf", sep=""),
+    width=15 , height=12)
+interval_value_plot / (cacta_fine_map  + Q)
+     dev.off()
+```
