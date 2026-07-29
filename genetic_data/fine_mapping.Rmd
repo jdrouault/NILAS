@@ -225,7 +225,10 @@ Interval_size = (max(calculation_file$i.end, na.rm =T) - min(calculation_file$i.
 
 ```{r extract the begin and end base paire of each interval}
 
-begin <- min(data1$i.start,  na.rm = T)
+i.start <- calculation_file$i.start
+i.end <- calculation_file$i.end[calculation_file$geno == "DP"]
+
+begin <- min(calculation_file$i.start,  na.rm = T)
 dataframe_interval  <- NULL 
 interval <- 1
 end <- 0
