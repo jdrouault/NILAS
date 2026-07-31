@@ -190,6 +190,7 @@ Q<- phenotype_zmpr4 %>%
   alpha = 0.5,
   linewidth = 0.8
 ) +
+  facet_wrap(~rp) +
   xlab("Transformed value of photoperiod sensitivity") + 
       # geom_vline(aes(xintercept = -id_new+48+0.5), colour="grey", size=0.5) +
       scale_alpha_manual(values = c(1, 0.5)) +
@@ -239,29 +240,50 @@ calculation_file <- geno_data %>%
 
 ```{r define interval number and interval size}
 
-Number_interval = 200
-Interval_size = (max(calculation_file$i.end, na.rm =T) - min(calculation_file$i.start, na.rm =T)) /Number_interval
+# Number_interval = 200
+# Interval_size = (max(calculation_file$i.end, na.rm =T) - min(calculation_file$i.start, na.rm =T)) /Number_interval
 
 ```
 
 ```{r extract the begin and end base paire of each interval}
 
+get_segment <- function(difference) {
+  seg <- integer(length(difference))
+  seg[1] <- 1L
+
+  for (i in 2:length(difference)) {
+    seg[i] <- seg[i - 1]
+    if (difference[i] > 0) {
+      seg[i] <- seg[i] + 1L
+    }
+  }
+  seg
+}
+
 
 dataframe_interval <- do.call(rbind, lapply(split(calculation_file, as.factor(calculation_file$Sample)), function(x){
-  # x <- split(calculation_file,as.factor(calculation_file$Sample))[[1]]
-  x <- x[x$geno == "DP",]
+  # print(unique(x$Sample))
+  # x <- split(calculation_file,as.factor(calculation_file$Sample))[["NILASq4g31i10"]]
+  x <- x[x$geno == "DP",] 
+  if(nrow(x) == 0){ ## don't use the sample in the calcul for interval as it does not contains dp 
+  }else{
+  
   result <-  x%>%
+    as.data.frame()%>%
     dplyr::arrange(marker)  %>%
-    dplyr::mutate( segment = 0, 
-    segment = ifelse(row_number() < n() & i.end == dplyr::lead(i.start), segment , segment +1
-    )
-  ) %>%
+    dplyr::mutate( 
+                   diff = if_else(
+      dplyr::row_number() == 1,
+      0,
+      i.start - dplyr::lag(i.end)), 
+             segment = get_segment(diff)) %>%
   dplyr::group_by(segment) %>%
   dplyr::summarise(
     begin = min(i.start, na.rm = TRUE),
     end   = max(i.end, na.rm = TRUE),
     .groups = "drop"
   )
+  }
 }))
 
 i.start <- dataframe_interval$begin
@@ -285,12 +307,29 @@ interval_list <- sort(interval_list)
   
 ```
 
+```{r exclude beginning and end interval where there are NA genotypes}
+
+#Define the interval of bp in which no segment are NA, all the sample don't start and nd at the same bp so to avoid having interval for which the sample contains no values (NA), we define an interval in which all the sample have segment attributed to dp or rp 
+start_point_sample<- calculation_file %>%
+  dplyr::group_by(Sample) %>%
+  dplyr::summarise(start_point = min(i.start, na.rm =T))
+
+start_point_interval_ttest <- max(unique(start_point_sample$start_point))
+
+end_point_sample<- calculation_file %>%
+  dplyr::group_by(Sample) %>%
+  dplyr::summarise(end_point = max(i.end, na.rm =T))
+
+end_point_interval_ttest <- min(unique(end_point_sample$end_point))
+
+```
+
 ```{r define the interval value}
 
 # Get mean size of segments in the targeted region of the NILs 
-mean_interval <- mean(calculation_file$dim_interval, na.rm =T)
+# mean_interval <- mean(calculation_file$dim_interval, na.rm =T)
 
-# Define in which the segment falls 
+# Define in which interval the segment falls 
 dataset_final <- NULL
 dataset_to_return <- NULL
 table_for_fine_mapping <- do.call(
@@ -366,36 +405,49 @@ table_for_fine_mapping <- do.call(
   )
 )
 
-## calculate the value of the interval 
-table_for_fine_mapping_interval_content <- table_for_fine_mapping %>%
-  dplyr::group_by(Sample, interval) %>%
-  dplyr::mutate(RP = sum(geno == "RP")/n(),
-                DP = 1 - RP) %>%
-  dplyr::select(Sample, RP, DP, interval) %>%
-  dplyr::distinct() 
+## get the interval of cacta 
+snp_start <- 94430850
+snp_end <- 94433495
+a <- 1
+interval_begin <- interval_list[[a]]
+interval_end <- interval_list[[a + 1]]
+end_max <- tail(interval_list, 1)
 
-ttest_pval <- table_for_fine_mapping_interval_content %>%
-  # dplyr::filter(Sample %in% unique(haplotype_single_intro$entryid))%>%
-  dplyr::full_join(phenotype_zmpr4[,c("Sample", "Estimate_transformed")] %>% dplyr::distinct()) %>%
-  tidyr::pivot_longer(cols = RP:DP, names_to = "geno",
-               values_to = "geno_value") %>%
-  dplyr::filter(geno_value != 0 & interval != 42, interval != 44) %>% ## à changer demain car c'est juste 100% rp faire en sorte de prendre en compte la condition 
-  # dplyr::group_by(interval, Sample, geno_value) %>%
-  # dplyr::mutate(geno_value_interval = Estimate_transformed*geno_value ) %>%
-  dplyr::group_by(interval) %>%
-  dplyr::summarise(pval = t.test(Estimate_transformed ~ geno)$p.value)
-  
+    if (snp_start < interval_end & snp_end > interval_end & snp_start < end_max ) {
+
+          while (snp_end > interval_end) {
+            # print(a)
+            a <- a + 1
+            interval_begin <- interval_list[[a]]
+            interval_end <- interval_list[[a + 1]]
+          }
+
+         a
+         
+
+        } else if (snp_start > interval_end & snp_start < end_max) {
+
+          while (snp_start > interval_end) {
+            a <- a + 1
+            interval_begin <- interval_list[[a]]
+            interval_end <- interval_list[[a + 1]]
+          }
+
+          a
+
+        }  else if (snp_end > end_max) {
+
+          a <- NA
+         a
+
+        } else {
+
+          a
+
+        }
 
 
-
-### dplyr::group_by(interval, Sample) %>%
-  dplyr::mutate(value_inerval = DP * Estimate_transformed)%>%
-  dplyr::group_by(interval) %>%
-  dplyr::summarise(value_inerval_tot = sum(value_inerval, na.rm = T)) %>%
-  dplyr::mutate(value_inerval_tot  = value_inerval_tot/pheno_tot)
-  
 ```
-
 
 ```{r plot genotype matrix}
 
@@ -410,12 +462,12 @@ cacta_fine_map <- calculation_file %>%
   geom_rect(aes(
     xmin = i.start,
     xmax = i.end,
-    ymin = id - 0.5,
-  ymax = id + 0.5,
+    ymin = id ,
+  ymax = id + 1,
     fill = geno
   ),
   size = 8) +
-  geom_hline(aes(yintercept =  id), color = "black") +
+  geom_hline(aes(yintercept =  id ), color = "black") +
   geom_vline(xintercept = 94430850, color = "red") +
   geom_vline(xintercept = 94433495, color = "red") +
   geom_vline(
@@ -491,59 +543,89 @@ cacta_fine_map
 
 ```
 
-```{r}
+```{r calculate the value of the interval}
 
-interval_value_plot <- ttest_pval %>%#table_for_fine_mapping_interval_value %>%
-  ggplot(aes( x= interval, y = pval)) + #value_inerval_tot
+table_for_fine_mapping_interval_content <- table_for_fine_mapping %>%
+  dplyr::filter(i.start > start_point_interval_ttest &
+                  i.end < end_point_interval_ttest) %>%
+  dplyr::group_by(Sample, interval) %>%
+  dplyr::mutate(RP = sum(geno == "RP") / n(), DP = 1 - RP, 
+                i.start = min(i.start), 
+                i.end = max(i.end)) %>%
+  dplyr::distinct() %>%
+  dplyr::select(Sample, RP, DP, interval, i.start, i.end) 
+
+interval_with_DP <- table_for_fine_mapping_interval_content %>%
+  dplyr::group_by(interval) %>%
+  dplyr::summarise(sum_DP = sum(DP, na.rm = T),
+                   sum_RP = sum(RP, na.rm = T)) %>%
+  dplyr::filter(sum_DP == 0 |
+                  sum_DP == 1 | sum_RP == 0 | sum_RP == 1)
+
+interval_for_plotting <- table_for_fine_mapping_interval_content %>%
+  dplyr::ungroup() %>%
+  dplyr::group_by(interval) %>%
+  dplyr::summarise(i.start = min(i.start, na.rm =T))
+
+```
+
+```{r extract p-val associated to the interval}
+
+ttest_pval <- table_for_fine_mapping_interval_content %>%
+  dplyr::full_join(phenotype_zmpr4[, c("Sample", "Estimate_transformed")] %>%
+                  dplyr::distinct()) %>%
+  tidyr::pivot_longer(cols = RP:DP,
+                      names_to = "geno",
+                      values_to = "geno_value") %>%
+  dplyr::filter(geno_value != 0 &
+                  !(interval %in% unique(interval_with_DP$interval))) %>%
+  dplyr::group_by(interval) %>%
+  dplyr::summarise(pval = t.test(Estimate_transformed ~ geno)$p.value, .groups = "drop")
+
+
+  
+### dplyr::group_by(interval, Sample) %>%
+  # dplyr::mutate(value_inerval = DP * Estimate_transformed)%>%
+  # dplyr::group_by(interval) %>%
+  # dplyr::summarise(value_inerval_tot = sum(value_inerval, na.rm = T)) %>%
+  # dplyr::mutate(value_inerval_tot  = value_inerval_tot/pheno_tot)
+  # 
+```
+
+
+
+```{r plot interval p-val}
+
+interval_value_plot <- ttest_pval %>%
+  dplyr::full_join(interval_for_plotting) %>%
+  ggplot(aes( x= i.start, y = pval)) + #value_inerval_tot
   geom_point() + 
-  # geom_vline(xintercept = 139, color = "red") +
+  geom_vline(aes(xintercept = i.start[interval == a]), color = "red") +
+  geom_hline(yintercept = 0.05, color = "darkgrey") +
   ylab("Value of the interval") +
-  theme(
-    # plot.background = element_blank()
-    ,
-    legend.position = "none"
-    #,legend.position = "top"
-    #,legend.direction="vertical"
-    #,legend.key.size = unit(0.5, "cm")
-    #,legend.text = element_text(size = 10)
-    #,aspect.ratio = 1
-    ,panel.grid.major = element_line(size=.1, color="black")
-    ,
-    panel.grid.minor = element_line( size=.1, color="black" )
-    ,
-    # panel.grid.major.x = element_blank()
-    ,
-    # panel.grid.major.y = element_blank()#element_line(colour="black", linetype = "dashed")        # ,panel.border = element_rect(colour="grey", linewidth = 0.5, fill=NA)
-    ,
-    panel.background = element_blank()
-    ,
-    plot.title = element_text(face = "bold", vjust = 1)
-    ,
-    axis.title.x = element_text(size = 14, vjust = 1.5)
-    ,
-    axis.text.x = element_text(
-      size = 14,
-      angle = 0,
-      hjust = 1,
-      vjust = 1
-    )
-    ,
-    axis.title.y = element_text(
-      size = 14,
-      angle = 90,
-      hjust = 1,
-      vjust = 1
-    )
-    ,
-    axis.text.y = element_text(
-      size = 10,
-      hjust = 1,
-      vjust = 1
-    )
-    #top, right, bottom, left
-    ,
-    plot.margin = unit(c(0.1, 0.01, 1, 0.01), "cm")
-  )
+  xlab("Target Interval\n(quantile positions, bp)") +
+   theme(plot.background = element_blank()
+                ,legend.position = "top"
+                #,legend.direction="vertical"
+                ,legend.key.size = unit(0.5, "cm")
+                ,legend.text = element_text(size = 10)
+                #,aspect.ratio = 1
+                #,panel.grid.major = element_blank()
+                ,panel.grid.minor = element_blank()
+                ,panel.grid.major.x = element_line(colour="grey", linetype = "dashed")
+                ,panel.grid.major.y = element_line(colour="grey")
+                ,panel.border = element_rect(colour="grey", linewidth = 0.5, fill=NA)
+                ,panel.background = element_blank()
+                ,plot.title = element_text(face="bold", vjust=-12.375, margin=margin(b=43))
+                ,axis.title.x = element_text(size=14, vjust=-4.5)
+                ,axis.text.x = element_text(size=12, angle=45, hjust=1, vjust=1)
+                ,axis.title.y = element_text(size=14)
+                ,axis.text.y =element_text(size=12)
+                #top, right, bottom, left
+                #,plot.margin=unit(c(0.125,0.5,0.72,0.5), "cm")
+                ,plot.margin=unit(c(0.02,0.5,0.72,0.5), "cm")
+          )
+        
 
 
 ```
