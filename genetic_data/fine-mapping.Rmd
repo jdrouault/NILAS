@@ -44,7 +44,9 @@ install.packages(c(
   "plyr",
   "reshape2",
   "stringr", 
-  "forcats"
+  "forcats",
+  "ggpubr",
+  "stat"
 ))
 ```
 
@@ -59,7 +61,8 @@ anyLib(c("data.table",
   "reshape2",
   "stringr", 
   "forcats", 
-  "ggpubr"))
+  "ggpubr", 
+  "stat"))
 ```
 
 ```{r palette}
@@ -79,14 +82,13 @@ dp_list <-  c(3, 4) #"CML277", "CML341"
 
 ```
 
-# Get phenotypic data 
+# Genotype
 
-Here we focus on slope of sensitivity (PS)
+We want to focus on lines belonging to group A (introgressed in the target region and nowhere else in the genome)
 
 ```{r load data, echo=TRUE, message=T}
 
 groupA_NILs <- read.csv(paste0(genetic_data_save_path, "20240913Selected_NILs_after_filtration.csv"), header = T)
-haplotype_slope <- read.csv(paste0(source_path, "haplotype_slope_20240921.csv"), header = T)
 
 ```
 
@@ -95,14 +97,77 @@ We keep only the genotypes introgressed in ZmPR 4 region (targeted region) and n
 ```{r get the genotypes to work on}
 
 ### here all this should be done before this script 
-
 geno_group <- groupA_NILs  %>%
       dplyr::mutate(rp = as.numeric(gsub(".*g[0-9]|i.*", "", entryid)),
                     dp = as.numeric(gsub(".*g|[0-9]i.*", "", entryid)), 
                     qtl = as.numeric(gsub(".*q|g.*", "", entryid))) %>%
-      dplyr::filter(rp %in% rp_list ) %>%
-      dplyr::filter( dp %in% dp_list) %>% 
+      dplyr::filter(rp %in% rp_list) %>%
+      dplyr::filter(dp %in% dp_list) %>% 
       dplyr::filter(qtl %in% ZmPR_list)
+
+```
+
+```{r load genotype data }
+
+geno_data <- read.csv(
+  paste0(
+    file.path(directory),
+    "/",
+    "_",
+    "20260728",
+    "_",
+    "mapping_data_NILAS",
+    ".csv"
+  ),
+  header = T,
+  sep = ","
+) %>%
+  dplyr::select(-X) %>% ## This step, i need to see why i have duplicates and after remove this two commandes
+  dplyr::filter(Sample %in% unique(geno_group$entryid)) %>%
+  dplyr::group_by(Sample) %>%
+  dplyr::distinct() %>%
+  dplyr::mutate(rp = as.numeric(gsub(".*g[0-9]|i.*", "", Sample)),
+                dp = as.numeric(gsub(".*g|[0-9]i.*", "", Sample)),
+                qtl = as.numeric(gsub(".*q|g.*", "", Sample))) 
+
+```
+
+```{r order the lines by breakpoints}
+
+## Create a list to define the order of the samples for the rest of the analysis
+only_RP_sample <- geno_data %>%
+  group_by(Sample) %>%
+  filter(!any(geno == "DP")) %>%
+  ungroup()## some sample only have RP we still keep in the lisf it they are not introgessed elsewhere in the genome 
+
+list_RP_geno <-  as.list(unique(only_RP_sample$Sample))
+sample_order <- geno_data %>%
+  dplyr::filter(geno == "DP") %>%
+  dplyr::group_by(Sample, rp) %>%
+  dplyr::summarise(min_i_start = min(i.start, na.rm = TRUE)) 
+sample_order <- dput(levels(reorder(sample_order$Sample, (sample_order$min_i_start))))
+sample_order <- dput(c(list_RP_geno, sample_order))
+
+## Alternative (separate per rp and then order within rp)
+sample_order_rp_1 <- dput(levels(reorder(sample_order$Sample[sample_order$rp == 1], (sample_order$min_i_start[sample_order$rp == 1]))))
+
+sample_order_rp_2 <- dput(levels(reorder(sample_order$Sample[sample_order$rp == 2], (sample_order$min_i_start[sample_order$rp == 2]))))
+sample_order_rp <- dput(c(list_RP_geno, sample_order_rp_2, sample_order_rp_1))
+
+## Order genotypes dataset
+calculation_file <- geno_data %>%
+  dplyr::group_by(Sample, marker) %>%
+  dplyr::mutate(dim_interval = i.end - i.start) %>%
+  dplyr::ungroup() %>%
+  dplyr::mutate(Sample = as.factor(Sample), 
+                Sample = factor(Sample, levels = sample_order_rp)) #or sample_order
+
+```
+
+
+```{r manupilation of phenotypic data}
+
+haplotype_slope <- read.csv(paste0(source_path, "haplotype_slope_20240921.csv"), header = T)
 
 phenotype_zmpr4 <- haplotype_slope %>%
   dplyr::mutate(rp = as.numeric(gsub(".*g[0-9]|i.*", "", haplotype)),
@@ -143,7 +208,7 @@ phenotype_zmpr4 <- haplotype_slope %>%
 
 We transform the estimates so they are all positive, for that we apply a linear transformation by adding the absolute value of the most negative estimates to the other estimates. 
 
-```{r}
+```{r manipulation of phenotypic data: define new estimate}
 
 min_value <- abs(min(phenotype_zmpr4$Estimate, na.rm = T))
 
@@ -158,12 +223,12 @@ phenotype_zmpr4 <- phenotype_zmpr4 %>%
   tidyr::pivot_longer(c(Estimate_of_origin, Addition), 
                       names_to = "Type", 
                       values_to = "values") %>%
-  dplyr::arrange(desc(Estimate_transformed)) %>%
+  # dplyr::arrange(desc(Estimate_transformed)) %>%
   dplyr::distinct()
 
 pheno_tot <- sum(phenotype_zmpr4$Estimate_transformed, na.rm = T)
 
-sample_order <- dput(levels(reorder(phenotype_zmpr4$Sample, desc(phenotype_zmpr4$Estimate_transformed))))
+# sample_order <- dput(levels(reorder(phenotype_zmpr4$Sample, desc(phenotype_zmpr4$Estimate_transformed))))
 
 ```
 
@@ -173,7 +238,7 @@ Q<- phenotype_zmpr4 %>%
   dplyr::group_by(Sample) %>%
   dplyr::mutate(id = cur_group_id())  %>%
     dplyr::mutate(
-    Sample = factor(Sample, levels = sample_order)
+    Sample = factor(Sample, levels = sample_order_rp) #or sample_order
   ) %>%
   ggplot(aes(x = values , y = Sample, fill = Type)) +
   geom_col( stat = "identity", position = "stack") +
@@ -219,22 +284,6 @@ Q
 
 ```
 
-# Genotype
-
-```{r load genotype data }
-
-geno_data <- read.csv(paste0(file.path(directory),"/","_", "20260728",  "_","mapping_data_NILAS",".csv"), header = T, sep = ",") %>%
-  dplyr::select(-X) %>% ## This step, i need to see why i have duplicates and after remove this two commandes 
-  dplyr::distinct()
-
-calculation_file <- geno_data %>%
-  dplyr::filter(Sample %in% unique(geno_group$entryid)) %>%
-  dplyr::group_by(Sample) %>%
-  dplyr::distinct() %>%
-  dplyr::group_by(Sample, marker) %>%
-  dplyr::mutate(dim_interval = i.end - i.start)
-
-```
 
 ## Fine map  
 
@@ -277,7 +326,7 @@ dataframe_interval <- do.call(rbind, lapply(split(calculation_file, as.factor(ca
       0,
       i.start - dplyr::lag(i.end)), 
              segment = get_segment(diff)) %>%
-  dplyr::group_by(segment) %>%
+  dplyr::group_by(segment, rp) %>%
   dplyr::summarise(
     begin = min(i.start, na.rm = TRUE),
     end   = max(i.end, na.rm = TRUE),
@@ -292,6 +341,18 @@ interval_list <- c(i.start, i.end)
 interval_list <- unique(interval_list)
 interval_list <- sort(interval_list)
 
+## Alternative if you want to get the breaks per rp 
+i.start_rp1 <- dataframe_interval$begin[dataframe_interval$rp == 1]
+i.end_rp1 <- dataframe_interval$end[dataframe_interval$rp == 1]
+interval_list_rp1 <- c(i.start_rp1, i.end_rp1) 
+interval_list_rp1 <- unique(interval_list_rp1)
+interval_list_rp1 <- sort(interval_list_rp1)
+
+i.start_rp2 <- dataframe_interval$begin[dataframe_interval$rp == 2]
+i.end_rp2 <- dataframe_interval$end[dataframe_interval$rp == 2]
+interval_list_rp2 <- c(i.start_rp2, i.end_rp2) 
+interval_list_rp2 <- unique(interval_list_rp2)
+interval_list_rp2 <- sort(interval_list_rp2)
 
 # begin <- min(calculation_file$i.start,  na.rm = T)
 # dataframe_interval  <- as.data.frame(NULL) 
@@ -339,9 +400,13 @@ table_for_fine_mapping <- do.call(
     function(x) {
     # x <- split(calculation_file,as.factor(calculation_file$Sample))[[1]]
 
-      dataset_final <- NULL
+      ## Run only if you want to get the interval per rp 
+      # rp <- unique(x$rp)
+      # interval_list <- if (rp == 1) interval_list_rp1 else interval_list_rp2  
+     
+       dataset_final <- NULL
       a <- 1
-
+      
       for (i in 1:nrow(x)) {
 
         # i <- 16   # remove after debugging
@@ -449,12 +514,23 @@ end_max <- tail(interval_list, 1)
 
 ```
 
+
 ```{r plot genotype matrix}
 
 cols.4 <- c("NA"="#F0E442", "DP"="#0072B2", "Het"="#CC79A7", "RP"="#999999")
 
+vline_rp1 <- data.frame(
+  rp = 1,
+  x = interval_list_rp1
+)
+
+vline_rp2 <- data.frame(
+  rp = 2,
+  x = interval_list_rp2
+)
+
 cacta_fine_map <- calculation_file %>%
-  dplyr::mutate(Sample = factor(Sample, levels = sample_order)) %>%
+  dplyr::mutate(Sample = factor(Sample, levels = sample_order_rp )) %>% #or sample_order
   dplyr::arrange(Sample)%>%
   dplyr::group_by(Sample) %>%
   dplyr::mutate(id = cur_group_id())  %>%
@@ -472,13 +548,21 @@ cacta_fine_map <- calculation_file %>%
   geom_vline(xintercept = 94433495, color = "red") +
   geom_vline(
     xintercept = interval_list,
-    # seq(#   min(interval_list), # dataframe_interval$begin
-    #   max(interval_list) #dataframe_interval$end
-    #   # by = Interval_size
-    # ),
-    # # linetype = "dashed",
     colour = "lightgrey"
   ) +
+  ## Alternative to see the plot per rp 
+#   facet_grid(~rp) +
+#  geom_vline(
+#   data = vline_rp1,
+#   aes(xintercept = x),
+#   colour = "lightgrey"
+# ) +
+# geom_vline(
+#   data = vline_rp2,
+#   aes(xintercept = x),
+#   colour = "lightgrey"
+# ) + 
+  ##
   ggtitle("A") +
   xlab("Target Interval\n(quantile positions, bp)") +
   ylab("") +
@@ -490,7 +574,7 @@ cacta_fine_map <- calculation_file %>%
     labels = c("NA", "Het", "DP", "RP")
   ) +
   scale_y_continuous(breaks  = c(2:(length(unique(calculation_file$Sample))+1)),
-                   labels = sample_order) +
+                   labels = sample_order_rp) +
   theme(
     plot.background = element_blank()
     ,
@@ -545,15 +629,18 @@ cacta_fine_map
 
 ```{r calculate the value of the interval}
 
-table_for_fine_mapping_interval_content <- table_for_fine_mapping %>%
+## Get the interval in which to test 
+table_for_fine_mapping <- table_for_fine_mapping %>%
   dplyr::filter(i.start > start_point_interval_ttest &
-                  i.end < end_point_interval_ttest) %>%
+                  i.end < end_point_interval_ttest) 
+
+table_for_fine_mapping_interval_content <- table_for_fine_mapping %>%
   dplyr::group_by(Sample, interval) %>%
   dplyr::mutate(RP = sum(geno == "RP") / n(), DP = 1 - RP, 
                 i.start = min(i.start), 
                 i.end = max(i.end)) %>%
-  dplyr::distinct() %>%
-  dplyr::select(Sample, RP, DP, interval, i.start, i.end) 
+  dplyr::select(Sample, RP, DP, interval, i.start, i.end) %>%
+  dplyr::distinct() 
 
 interval_with_DP <- table_for_fine_mapping_interval_content %>%
   dplyr::group_by(interval) %>%
@@ -566,6 +653,33 @@ interval_for_plotting <- table_for_fine_mapping_interval_content %>%
   dplyr::ungroup() %>%
   dplyr::group_by(interval) %>%
   dplyr::summarise(i.start = min(i.start, na.rm =T))
+
+### Alternative test interval value per rp 
+interval_with_DP_rp1 <- table_for_fine_mapping %>%
+  dplyr::filter(rp == 1) %>%
+  dplyr::group_by(Sample, interval) %>%
+  dplyr::mutate(RP = sum(geno == "RP") / n(), DP = 1 - RP, 
+                i.start = min(i.start), 
+                i.end = max(i.end)) %>%
+  dplyr::select(Sample, rp, RP, DP, interval, i.start, i.end) %>%
+  dplyr::distinct() %>%
+  dplyr::group_by(interval) %>%
+  dplyr::summarise(sum_DP = sum(DP, na.rm = T),
+                   sum_RP = sum(RP, na.rm = T))
+
+  
+  interval_with_DP_rp2 <- table_for_fine_mapping %>%
+  dplyr::filter(rp == 2) %>%
+  dplyr::group_by(Sample, interval) %>%
+  dplyr::mutate(RP = sum(geno == "RP") / n(), DP = 1 - RP, 
+                i.start = min(i.start), 
+                i.end = max(i.end)) %>%
+  dplyr::select(Sample, rp, RP, DP, interval, i.start, i.end) %>%
+  dplyr::distinct() %>%
+  dplyr::group_by(interval) %>%
+  dplyr::summarise(sum_DP = sum(DP, na.rm = T),
+                   sum_RP = sum(RP, na.rm = T)) 
+
 
 ```
 
@@ -580,7 +694,8 @@ ttest_pval <- table_for_fine_mapping_interval_content %>%
   dplyr::filter(geno_value != 0 &
                   !(interval %in% unique(interval_with_DP$interval))) %>%
   dplyr::group_by(interval) %>%
-  dplyr::summarise(pval = t.test(Estimate_transformed ~ geno)$p.value, .groups = "drop")
+  dplyr::summarise(pval = t.test(Estimate_transformed ~ geno)$p.value, .groups = "drop") %>%
+  dplyr::mutate(pval_adjusted = p.adjust(pval,method="BH"))
 
 
   
@@ -598,11 +713,11 @@ ttest_pval <- table_for_fine_mapping_interval_content %>%
 
 interval_value_plot <- ttest_pval %>%
   dplyr::full_join(interval_for_plotting) %>%
-  ggplot(aes( x= i.start, y = pval)) + #value_inerval_tot
+  ggplot(aes( x= i.start, y = -log10(pval_adjusted))) + #value_inerval_tot
   geom_point() + 
   geom_vline(aes(xintercept = i.start[interval == a]), color = "red") +
-  geom_hline(yintercept = 0.05, color = "darkgrey") +
-  ylab("Value of the interval") +
+  geom_hline(yintercept = -log10(0.05), color = "darkgrey") +
+  ylab("-log10(p-value) of the interval") +
   xlab("Target Interval\n(quantile positions, bp)") +
    theme(plot.background = element_blank()
                 ,legend.position = "top"
