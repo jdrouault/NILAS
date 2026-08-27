@@ -46,7 +46,8 @@ install.packages(c(
   "stringr", 
   "forcats",
   "ggpubr",
-  "stat"
+  "stat", 
+  "ggforce"
 ))
 ```
 
@@ -62,7 +63,8 @@ anyLib(c("data.table",
   "stringr", 
   "forcats", 
   "ggpubr", 
-  "stat"))
+  "stat", 
+  "ggforce"))
 ```
 
 ```{r palette}
@@ -78,7 +80,8 @@ This demonstration of fine-mapping will be done with the CACTA-like transposable
 
 ZmPR_list <- 4 
 rp_list <- c(1, 2) #"2369", "LH123Ht"
-dp_list <-  c(3, 4) #"CML277", "CML341"
+# dp_list <-  c(3, 4) #"CML277", "CML341"
+dp_list <-  c(1:7) #"CML277", "CML341"
 
 ```
 
@@ -103,7 +106,8 @@ geno_group <- groupA_NILs  %>%
                     qtl = as.numeric(gsub(".*q|g.*", "", entryid))) %>%
       dplyr::filter(rp %in% rp_list) %>%
       dplyr::filter(dp %in% dp_list) %>% 
-      dplyr::filter(qtl %in% ZmPR_list)
+      dplyr::filter(qtl %in% ZmPR_list) %>%
+      droplevels 
 
 ```
 
@@ -128,7 +132,8 @@ geno_data <- read.csv(
   dplyr::distinct() %>%
   dplyr::mutate(rp = as.numeric(gsub(".*g[0-9]|i.*", "", Sample)),
                 dp = as.numeric(gsub(".*g|[0-9]i.*", "", Sample)),
-                qtl = as.numeric(gsub(".*q|g.*", "", Sample))) 
+                qtl = as.numeric(gsub(".*q|g.*", "", Sample))) %>%
+      droplevels 
 
 ```
 
@@ -140,19 +145,23 @@ only_RP_sample <- geno_data %>%
   filter(!any(geno == "DP")) %>%
   ungroup()## some sample only have RP we still keep in the lisf it they are not introgessed elsewhere in the genome 
 
-list_RP_geno <-  as.list(unique(only_RP_sample$Sample))
+list_RP_geno <-  (unique(only_RP_sample$Sample))
 sample_order <- geno_data %>%
   dplyr::filter(geno == "DP") %>%
   dplyr::group_by(Sample, rp) %>%
-  dplyr::summarise(min_i_start = min(i.start, na.rm = TRUE)) 
-sample_order <- dput(levels(reorder(sample_order$Sample, (sample_order$min_i_start))))
-sample_order <- dput(c(list_RP_geno, sample_order))
+  dplyr::summarise(min_i_start = min(i.start, na.rm = TRUE))
+# 
+# # If yu want to make the analysis with the recurrent parents together 
+# sample_order <- dput(levels(reorder(sample_order$Sample, (sample_order$min_i_start))))
+# sample_order <- dput(c(list_RP_geno, sample_order))
 
 ## Alternative (separate per rp and then order within rp)
 sample_order_rp_1 <- dput(levels(reorder(sample_order$Sample[sample_order$rp == 1], (sample_order$min_i_start[sample_order$rp == 1]))))
+sample_order_rp_1 <- dput(c(subset(list_RP_geno, grepl(".*1i.*", list_RP_geno)), sample_order_rp_1))
 
 sample_order_rp_2 <- dput(levels(reorder(sample_order$Sample[sample_order$rp == 2], (sample_order$min_i_start[sample_order$rp == 2]))))
-sample_order_rp <- dput(c(list_RP_geno, sample_order_rp_2, sample_order_rp_1))
+sample_order_rp_2 <- dput(c(subset(list_RP_geno, grepl(".*2i.*", list_RP_geno)), sample_order_rp_2))
+sample_order_rp <- dput( c(sample_order_rp_2, sample_order_rp_1))
 
 ## Order genotypes dataset
 calculation_file <- geno_data %>%
@@ -177,6 +186,7 @@ phenotype_zmpr4 <- haplotype_slope %>%
   dplyr::filter(rp %in% rp_list) %>%
   dplyr::filter(dp %in% dp_list) %>%
   dplyr::filter(qtl %in% ZmPR_list) %>%
+  droplevels %>%
   #  dplyr::full_join(NILAS_newid) %>%
   #  dplyr::mutate(id_new = as.factor(id_new),
   #                   id_new = fct_rev(id_new)) %>%
@@ -210,9 +220,12 @@ We transform the estimates so they are all positive, for that we apply a linear 
 
 ```{r manipulation of phenotypic data: define new estimate}
 
-min_value <- abs(min(phenotype_zmpr4$Estimate, na.rm = T))
+min_value <- phenotype_zmpr4 %>%
+  dplyr::group_by(rp, dp) %>%
+  dplyr::summarize(min_value = abs(min(Estimate, na.rm = T)))
 
 phenotype_zmpr4 <- phenotype_zmpr4 %>% 
+  dplyr::full_join(min_value) %>%
   # dplyr::select(entryid2, Estimate, marker, id_new) %>%
   dplyr::rename(Sample  = entryid2) %>%
   dplyr::group_by(Sample) %>%
@@ -241,21 +254,23 @@ Q<- phenotype_zmpr4 %>%
     Sample = factor(Sample, levels = sample_order_rp) #or sample_order
   ) %>%
   ggplot(aes(x = values , y = Sample, fill = Type)) +
-  geom_col( stat = "identity", position = "stack") +
+  geom_col( stat = "identity", position = "stack", width = 1) +
    scale_fill_manual(values = cbPalette) +
-      geom_errorbar(
-  data = dplyr::filter(phenotype_zmpr4, Type == "Estimate_of_origin"),
-  aes(
-    y = Sample,
-    xmin = values - Std..Error,
-    xmax = values + Std..Error
-  ),
-  width = 0.5,
-  colour = "black",
-  alpha = 0.5,
-  linewidth = 0.8
-) +
+#       geom_errorbar(
+#   data = dplyr::filter(phenotype_zmpr4, Type == "Estimate_of_origin"),
+#   aes(
+#     y = Sample,
+#     xmin = values - Std..Error,
+#     xmax = values + Std..Error
+#   ),
+#   width = 1,
+#   colour = "black",
+#   alpha = 0.5,
+#   linewidth = 0.8
+# ) +
   facet_wrap(~rp) +
+  geom_vline(xintercept = 0) +
+  # facet_grid(rp~dp, scales = "free_y") + 
   xlab("Transformed value of photoperiod sensitivity") + 
       # geom_vline(aes(xintercept = -id_new+48+0.5), colour="grey", size=0.5) +
       scale_alpha_manual(values = c(1, 0.5)) +
@@ -273,7 +288,7 @@ Q<- phenotype_zmpr4 %>%
             ,axis.title.x = element_text(size=14, vjust=1.5)
             ,axis.text.x = element_text(size=14, angle=45, hjust=1, vjust=1)
             ,axis.title.y = element_blank() #element_text(size=14, angle=0, hjust=1, vjust=1)
-            ,axis.text.y = element_text(size=14, angle=0, hjust=1, vjust=1, color = "white") 
+            ,axis.text.y = element_text(size=14, angle=0, hjust=1, vjust=1, color = "grey") 
             ,axis.ticks.y = element_blank()
             ,plot.margin = unit(c(0,0,0,0), "lines") 
       )
@@ -283,7 +298,6 @@ Q<- phenotype_zmpr4 %>%
 Q
 
 ```
-
 
 ## Fine map  
 
@@ -326,7 +340,7 @@ dataframe_interval <- do.call(rbind, lapply(split(calculation_file, as.factor(ca
       0,
       i.start - dplyr::lag(i.end)), 
              segment = get_segment(diff)) %>%
-  dplyr::group_by(segment, rp) %>%
+  dplyr::group_by(segment, rp, dp) %>%
   dplyr::summarise(
     begin = min(i.start, na.rm = TRUE),
     end   = max(i.end, na.rm = TRUE),
@@ -337,22 +351,33 @@ dataframe_interval <- do.call(rbind, lapply(split(calculation_file, as.factor(ca
 
 i.start <- dataframe_interval$begin
 i.end <- dataframe_interval$end
-interval_list <- c(i.start, i.end) 
+interval_list <- c(i.start, i.end)
 interval_list <- unique(interval_list)
 interval_list <- sort(interval_list)
 
-## Alternative if you want to get the breaks per rp 
-i.start_rp1 <- dataframe_interval$begin[dataframe_interval$rp == 1]
-i.end_rp1 <- dataframe_interval$end[dataframe_interval$rp == 1]
-interval_list_rp1 <- c(i.start_rp1, i.end_rp1) 
-interval_list_rp1 <- unique(interval_list_rp1)
-interval_list_rp1 <- sort(interval_list_rp1)
+## Additionnal if you want to get the breaks per rp 
+for (rp in rp_list){
+i.start <- dataframe_interval$begin[dataframe_interval$rp == rp]
+i.end<- dataframe_interval$end[dataframe_interval$rp == rp]
+interval_list <- c(i.start, i.end) 
+interval_list<- unique(interval_list)
+interval_list<- sort(interval_list)
+assign(paste0("interval_list_", rp), interval_list)    
+}
 
-i.start_rp2 <- dataframe_interval$begin[dataframe_interval$rp == 2]
-i.end_rp2 <- dataframe_interval$end[dataframe_interval$rp == 2]
-interval_list_rp2 <- c(i.start_rp2, i.end_rp2) 
-interval_list_rp2 <- unique(interval_list_rp2)
-interval_list_rp2 <- sort(interval_list_rp2)
+## Additionnal if you want to get the breaks per rp & dp
+for (rp in rp_list){
+  for(dp in dp_list){
+i.start <- dataframe_interval$begin[dataframe_interval$rp == rp & dataframe_interval$dp ==dp]
+i.end<- dataframe_interval$end[dataframe_interval$rp == rp & dataframe_interval$dp ==dp]
+interval_list <- c(i.start, i.end) 
+interval_list<- unique(interval_list)
+interval_list<- sort(interval_list)
+(assign(paste0("interval_list_", rp, "_", dp), interval_list))
+
+  }
+}
+
 
 # begin <- min(calculation_file$i.start,  na.rm = T)
 # dataframe_interval  <- as.data.frame(NULL) 
@@ -366,23 +391,6 @@ interval_list_rp2 <- sort(interval_list_rp2)
 #   interval <- interval + 1
 # }
   
-```
-
-```{r exclude beginning and end interval where there are NA genotypes}
-
-#Define the interval of bp in which no segment are NA, all the sample don't start and nd at the same bp so to avoid having interval for which the sample contains no values (NA), we define an interval in which all the sample have segment attributed to dp or rp 
-start_point_sample<- calculation_file %>%
-  dplyr::group_by(Sample) %>%
-  dplyr::summarise(start_point = min(i.start, na.rm =T))
-
-start_point_interval_ttest <- max(unique(start_point_sample$start_point))
-
-end_point_sample<- calculation_file %>%
-  dplyr::group_by(Sample) %>%
-  dplyr::summarise(end_point = max(i.end, na.rm =T))
-
-end_point_interval_ttest <- min(unique(end_point_sample$end_point))
-
 ```
 
 ```{r define the interval value}
@@ -399,32 +407,44 @@ table_for_fine_mapping <- do.call(
     split(calculation_file, calculation_file$Sample),
     function(x) {
     # x <- split(calculation_file,as.factor(calculation_file$Sample))[[1]]
+      
+      ## Run only if you want to get the interval per rp
+      rp <- unique(x$rp)
+      dp <- unique(x$dp)
+print((paste0("interval_list", "_", rp, "_", dp)))
+      interval_list <- get(paste0("interval_list", "_", rp, "_", dp))
+      
+      # interval_list <- if (rp == 1) interval_list_rp1 else interval_list_rp2
+      # begin_interval <- if (rp == 1) start_point_interval_ttest_rp1 else start_point_interval_ttest_rp2
+      # end_interval <- if (rp == 1) end_point_interval_ttest_rp1 else end_point_interval_ttest_rp2
 
-      ## Run only if you want to get the interval per rp 
-      # rp <- unique(x$rp)
-      # interval_list <- if (rp == 1) interval_list_rp1 else interval_list_rp2  
+
      
        dataset_final <- NULL
-      a <- 1
+      # a <- 1
       
       for (i in 1:nrow(x)) {
+            # print(i)
 
-        # i <- 16   # remove after debugging
+        # i <- 5  # remove after debugging
 
         dataset1 <- x[i, ]
         snp_start <- x$i.start[i]
         snp_end <- x$i.end[i]
         max_snp_end <- tail(x$i.end, 1)
-
+        
         a <- 1
         interval_begin <- interval_list[[a]]
         interval_end <- interval_list[[a + 1]]
         end_max <- tail(interval_list, 1)
-
+        
+        # if(snp_start < begin_interval | snp_start > end_interval) {
+        #   a <- NA
+        #   dataset1[, "interval"] <- a
+        #   dataset_final <- rbind(dataset_final, dataset1)}
         if (snp_start < interval_end & snp_end > interval_end & snp_start < end_max ) {
 
           while (snp_end > interval_end) {
-            # print(a)
             a <- a + 1
             interval_begin <- interval_list[[a]]
             interval_end <- interval_list[[a + 1]]
@@ -433,9 +453,9 @@ table_for_fine_mapping <- do.call(
           dataset1[, "interval"] <- a
           dataset_final <- rbind(dataset_final, dataset1)
 
-        } else if (snp_start > interval_end & snp_start < end_max) {
+        } else if (snp_start >= interval_end & snp_start < end_max) {
 
-          while (snp_start > interval_end) {
+          while (snp_start >= interval_end) {
             a <- a + 1
             interval_begin <- interval_list[[a]]
             interval_end <- interval_list[[a + 1]]
@@ -474,6 +494,8 @@ table_for_fine_mapping <- do.call(
 snp_start <- 94430850
 snp_end <- 94433495
 a <- 1
+
+# With both rp together 
 interval_begin <- interval_list[[a]]
 interval_end <- interval_list[[a + 1]]
 end_max <- tail(interval_list, 1)
@@ -490,9 +512,9 @@ end_max <- tail(interval_list, 1)
          a
          
 
-        } else if (snp_start > interval_end & snp_start < end_max) {
+        } else if (snp_start >= interval_end & snp_start < end_max) {
 
-          while (snp_start > interval_end) {
+          while (snp_start >= interval_end) {
             a <- a + 1
             interval_begin <- interval_list[[a]]
             interval_end <- interval_list[[a + 1]]
@@ -512,6 +534,58 @@ end_max <- tail(interval_list, 1)
         }
 
 
+## Alternative analysis by rp 
+interval_causal_variant_rp <- NULL
+for(rp in rp_list){
+  for(dp in dp_list){
+  a <- 1
+  # rp  <- 2
+
+  interval_list <- get(paste0("interval_list", "_", rp, "_", dp))
+# interval_list <- if (rp == 1) interval_list_rp1 else interval_list_rp2
+interval_begin <- interval_list[[a]]
+interval_end <- interval_list[[a + 1]]
+end_max <- tail(interval_list, 1)
+
+    if (snp_start < interval_end & snp_end > interval_end & snp_start < end_max ) {
+
+          while (snp_end > interval_end) {
+            # print(a)
+            a <- a + 1
+            interval_begin <- interval_list[[a]]
+            interval_end <- interval_list[[a + 1]]
+          }
+
+         a
+         
+
+        } else if (snp_start >= interval_end & snp_start < end_max) {
+
+          while (snp_start >= interval_end) {
+            a <- a + 1
+            interval_begin <- interval_list[[a]]
+            interval_end <- interval_list[[a + 1]]
+          }
+
+          a
+
+        }  else if (snp_end > end_max) {
+
+          a <- NA
+         a
+
+        } else {
+
+          a
+
+        }
+
+data <- cbind.data.frame(rp, dp,  a)
+interval_causal_variant_rp <- rbind.data.frame(data, interval_causal_variant_rp)
+
+}
+}
+
 ```
 
 
@@ -519,20 +593,28 @@ end_max <- tail(interval_list, 1)
 
 cols.4 <- c("NA"="#F0E442", "DP"="#0072B2", "Het"="#CC79A7", "RP"="#999999")
 
-vline_rp1 <- data.frame(
-  rp = 1,
-  x = interval_list_rp1
-)
+vline_all <- NULL
+for(rp in rp_list){
+  for(dp in dp_list){
+vline <- data.frame(
+  rp = rp,
+  dp = dp, 
+  x = get(paste0("interval_list", "_", rp, "_", dp)))
+  vline_all <- rbind(vline, vline_all)
+}}
 
-vline_rp2 <- data.frame(
-  rp = 2,
-  x = interval_list_rp2
-)
-
+# vline_rp2 <- data.frame(
+#   rp = 2,
+#   x = interval_list_rp2
+# )
+ page <- 1:2
+for(p in page){
 cacta_fine_map <- calculation_file %>%
   dplyr::mutate(Sample = factor(Sample, levels = sample_order_rp )) %>% #or sample_order
   dplyr::arrange(Sample)%>%
   dplyr::group_by(Sample) %>%
+  # dplyr::filter(rp == 1) %>%
+  # droplevels() %>%
   dplyr::mutate(id = cur_group_id())  %>%
   ggplot() +
   geom_rect(aes(
@@ -546,23 +628,25 @@ cacta_fine_map <- calculation_file %>%
   geom_hline(aes(yintercept =  id ), color = "black") +
   geom_vline(xintercept = 94430850, color = "red") +
   geom_vline(xintercept = 94433495, color = "red") +
-  geom_vline(
-    xintercept = interval_list,
-    colour = "lightgrey"
-  ) +
+  ## With both recurrent parents together 
+  # geom_vline(
+  #   xintercept = interval_list,
+  #   colour = "lightgrey"
+  # ) +
   ## Alternative to see the plot per rp 
-#   facet_grid(~rp) +
-#  geom_vline(
-#   data = vline_rp1,
-#   aes(xintercept = x),
-#   colour = "lightgrey"
-# ) +
+  # facet_wrap(~rp) +
+  facet_wrap_paginate(rp~dp, nrow= 2, page = p) +
+ geom_vline(
+  data = vline_all,
+  aes(xintercept = x),
+  colour = "lightgrey"
+) +
 # geom_vline(
 #   data = vline_rp2,
 #   aes(xintercept = x),
 #   colour = "lightgrey"
-# ) + 
-  ##
+# ) +
+#
   ggtitle("A") +
   xlab("Target Interval\n(quantile positions, bp)") +
   ylab("") +
@@ -621,14 +705,62 @@ cacta_fine_map <- calculation_file %>%
     ,
     unit(c(0,0,0,0), "lines")
   )
+}
 
 
 cacta_fine_map
 
 ```
 
+
+```{r exclude beginning and end interval where there are NA genotypes}
+
+#Define the interval of bp in which no segment are NA, all the sample don't start and nd at the same bp so to avoid having interval for which the sample contains no values (NA), we define an interval in which all the sample have segment attributed to dp or rp 
+start_point_sample<- calculation_file %>%
+  dplyr::group_by(Sample) %>%
+  dplyr::summarise(start_point = min(i.start, na.rm =T))
+
+start_point_interval_ttest <- max(unique(start_point_sample$start_point))
+
+end_point_sample<- calculation_file %>%
+  dplyr::group_by(Sample) %>%
+  dplyr::summarise(end_point = max(i.end, na.rm =T))
+
+end_point_interval_ttest <- min(unique(end_point_sample$end_point))
+
+
+## Alternative for analysis separated by rp & dp
+
+start_end_ttest <- NULL 
+for (rp in rp_list){
+  for(dp in dp_list){
+    start_end_ttest_ind <- NULL
+start_point_sample<- calculation_file %>%
+  dplyr::filter(rp == rp & dp == dp) %>%
+  dplyr::group_by(Sample) %>%
+  dplyr::summarise(start_point = min(i.start, na.rm =T))
+
+start_point_interval_ttest <- max(unique(start_point_sample$start_point))
+# (assign(paste0("start_point_interval_ttest", rp, "_", dp), start_point_interval_ttest))
+
+end_point_sample<- calculation_file %>%
+  dplyr::filter(rp == rp & dp == dp) %>%
+  dplyr::group_by(Sample) %>%
+  dplyr::summarise(end_point = max(i.end, na.rm =T))
+
+end_point_interval_ttest <- min(unique(end_point_sample$end_point))
+# (assign(paste0("end_point_interval_ttest", rp, "_", dp), end_point_interval_ttest))
+
+start_end_ttest_ind <- cbind(start_point_interval_ttest, end_point_interval_ttest, rp, dp)
+start_end_ttest <- rbind(start_end_ttest_ind, start_end_ttest)
+
+}}
+
+```
+
 ```{r calculate the value of the interval}
 
+# Test for both rp together 
 ## Get the interval in which to test 
 table_for_fine_mapping <- table_for_fine_mapping %>%
   dplyr::filter(i.start > start_point_interval_ttest &
@@ -646,41 +778,72 @@ interval_with_DP <- table_for_fine_mapping_interval_content %>%
   dplyr::group_by(interval) %>%
   dplyr::summarise(sum_DP = sum(DP, na.rm = T),
                    sum_RP = sum(RP, na.rm = T)) %>%
-  dplyr::filter(sum_DP == 0 |
-                  sum_DP == 1 | sum_RP == 0 | sum_RP == 1)
+  dplyr::filter(sum_DP == 0 | sum_DP == 1 | sum_RP == 0 | sum_RP == 1 | sum_DP < 1) ## if there is 0 or 1 segment with RP or DP then the mean can't be calculated 
 
 interval_for_plotting <- table_for_fine_mapping_interval_content %>%
   dplyr::ungroup() %>%
   dplyr::group_by(interval) %>%
   dplyr::summarise(i.start = min(i.start, na.rm =T))
 
-### Alternative test interval value per rp 
-interval_with_DP_rp1 <- table_for_fine_mapping %>%
-  dplyr::filter(rp == 1) %>%
+### Alternative test interval value per rp and dp
+table_for_fine_mapping_interval_content_all <- NULL
+for (rp in rp_list){
+  for(dp in dp_list){
+    # dp <- 5
+    # rp <- 2
+start_end_ttest <- start_end_ttest %>%
+  as.data.frame() %>%
+  dplyr::filter(rp == rp & dp ==dp) 
+
+ table_for_fine_mapping_interval_content <- table_for_fine_mapping %>%
+  dplyr::filter(rp == rp & dp == dp) %>%
+   dplyr::filter(i.start > start_end_ttest$start_point_interval_ttest &
+                  i.end < start_end_ttest$end_point_interval_ttest) %>%
   dplyr::group_by(Sample, interval) %>%
-  dplyr::mutate(RP = sum(geno == "RP") / n(), DP = 1 - RP, 
+  dplyr::mutate(
+    RP = sum(geno == "RP") / n(), DP = 1 - RP,
                 i.start = min(i.start), 
                 i.end = max(i.end)) %>%
-  dplyr::select(Sample, rp, RP, DP, interval, i.start, i.end) %>%
-  dplyr::distinct() %>%
-  dplyr::group_by(interval) %>%
-  dplyr::summarise(sum_DP = sum(DP, na.rm = T),
-                   sum_RP = sum(RP, na.rm = T))
+  dplyr::select(Sample, rp, dp, RP, DP, interval, i.start, i.end) 
+ 
+ table_for_fine_mapping_interval_content_all <- rbind.data.frame(table_for_fine_mapping_interval_content, table_for_fine_mapping_interval_content_all) %>%
+   distinct()
+ # assign(paste0("table_for_fine_mapping_", rp, dp), table_for_fine_mapping_interval_content)    
 
+ 
+ # table_for_fine_mapping_content_rp1_sample <- unique(table_for_fine_mapping_content_rp1$Sample)[seq_along(unique(table_for_fine_mapping_content_rp1$Sample)) %% 5 == 1]
+
+  }}
+
+interval_for_plotting_rp_dp <- table_for_fine_mapping %>%
+  dplyr::ungroup() %>%
+  dplyr::group_by(interval, rp, dp) %>%
+  dplyr::summarise(i.start = min(i.start, na.rm =T)) 
+
+## rp2
+#   table_for_fine_mapping_content_rp2 <- table_for_fine_mapping %>%
+#   dplyr::filter(rp == 2) %>%
+#   dplyr::filter(i.start > start_point_interval_ttest_rp2 &
+#                   i.end < end_point_interval_ttest_rp2) %>%
+#   dplyr::group_by(Sample, interval) %>%
+#   dplyr::mutate(RP = sum(geno == "RP") / n(), DP = 1 - RP, 
+#                 i.start = min(i.start), 
+#                 i.end = max(i.end)) %>%
+#   dplyr::select(Sample, rp, RP, DP, interval, i.start, i.end) %>%
+#   dplyr::distinct()
+#   
+# interval_with_DP_rp2 <- table_for_fine_mapping_content_rp2 %>%
+#   dplyr::group_by(interval) %>%
+#   dplyr::summarise(sum_DP = sum(DP, na.rm = T),
+#                    sum_RP = sum(RP, na.rm = T)) %>%
+#   dplyr::filter(sum_DP == 0 | sum_DP == 1 | sum_RP == 0 | sum_RP == 1 ) %>%
+#   dplyr::select(interval)
+# 
+# interval_for_plotting_rp <- table_for_fine_mapping %>%
+#   dplyr::ungroup() %>%
+#   dplyr::group_by(interval, rp) %>%
+#   dplyr::summarise(i.start = min(i.start, na.rm =T))
   
-  interval_with_DP_rp2 <- table_for_fine_mapping %>%
-  dplyr::filter(rp == 2) %>%
-  dplyr::group_by(Sample, interval) %>%
-  dplyr::mutate(RP = sum(geno == "RP") / n(), DP = 1 - RP, 
-                i.start = min(i.start), 
-                i.end = max(i.end)) %>%
-  dplyr::select(Sample, rp, RP, DP, interval, i.start, i.end) %>%
-  dplyr::distinct() %>%
-  dplyr::group_by(interval) %>%
-  dplyr::summarise(sum_DP = sum(DP, na.rm = T),
-                   sum_RP = sum(RP, na.rm = T)) 
-
-
 ```
 
 ```{r extract p-val associated to the interval}
@@ -694,10 +857,75 @@ ttest_pval <- table_for_fine_mapping_interval_content %>%
   dplyr::filter(geno_value != 0 &
                   !(interval %in% unique(interval_with_DP$interval))) %>%
   dplyr::group_by(interval) %>%
-  dplyr::summarise(pval = t.test(Estimate_transformed ~ geno)$p.value, .groups = "drop") %>%
+  dplyr::summarise(pval = t.test(Estimate_transformed ~ geno)$p.value, .groups = "drop", var.equal = FALSE) %>%
   dplyr::mutate(pval_adjusted = p.adjust(pval,method="BH"))
 
+## Alternative analysis by rp and dp 
+ttest_pval_separate_rp <- NULL
+for (a in rp_list){
+  for(b in dp_list){
+    # a <- 2
+    # b <-3
+ interval_with_DP <- get(paste0("interval_with_DP_", rp, dp))
+ 
+ Sample <- subset(table_for_fine_mapping_interval_content_all, rp== a & dp == b)
+  Sample <-      unique(droplevels(Sample$Sample))
+  
+  
+interval_with_DP <- table_for_fine_mapping_interval_content_all %>%
+      dplyr::filter(rp== a & dp == b) %>%
+   dplyr::group_by(interval) %>%
+  dplyr::summarise(sum_DP = sum(DP, na.rm = T),
+                   sum_RP = sum(RP, na.rm = T)) %>%
+dplyr::filter(sum_DP == 0 | sum_DP == 1 | sum_RP == 0 | sum_RP == 1 | sum_DP < 1 |  sum_RP <1) %>% dplyr::select(interval)
 
+ assign(paste0("interval_with_DP_", rp, dp), interval_with_DP)  
+
+    ttest_pval_rp1 <- table_for_fine_mapping_interval_content_all %>%
+      dplyr::filter(rp== a & dp == b) %>%
+      droplevels() %>%
+  dplyr::full_join(phenotype_zmpr4[, c("Sample", "Estimate_transformed")] %>%
+                  dplyr::distinct()) %>%
+  tidyr::pivot_longer(cols = RP:DP,
+                      names_to = "geno",
+                      values_to = "geno_value") %>%
+  dplyr::filter(geno_value != 0 &
+                  !(interval %in% unique(interval_with_DP$interval)) & Sample %in% Sample ) %>%
+  dplyr::group_by(interval, rp, dp) %>%
+  dplyr::summarise(pval = t.test(Estimate_transformed ~ geno)$p.value, .groups = "drop", var.equal = FALSE) %>%
+  dplyr::mutate(pval_adjusted = p.adjust(pval,method="BH") )
+                
+#                 
+# ttest_pval_rp1 <- table_for_fine_mapping_content_rp1 %>%
+#   dplyr::full_join(phenotype_zmpr4[, c("Sample", "Estimate_transformed")] %>%
+#                   dplyr::distinct()) %>%
+#   tidyr::pivot_longer(cols = RP:DP,
+#                       names_to = "geno",
+#                       values_to = "geno_value") %>%
+#   dplyr::filter(geno_value != 0 &
+#                   !(interval %in% unique(interval_with_DP_rp1$interval)) & Sample %in% table_for_fine_mapping_content_rp1_sample ) %>%
+#   dplyr::group_by(interval, rp) %>%
+#   dplyr::summarise(pval = t.test(Estimate_transformed ~ geno)$p.value, .groups = "drop", var.equal = FALSE) %>%
+#   dplyr::mutate(pval_adjusted = p.adjust(pval,method="BH"))
+# 
+# ttest_pval_rp2 <- table_for_fine_mapping_content_rp2 %>%
+#   dplyr::full_join(phenotype_zmpr4[, c("Sample", "Estimate_transformed")] %>%
+#                   dplyr::distinct()) %>%
+#   tidyr::pivot_longer(cols = RP:DP,
+#                       names_to = "geno",
+#                       values_to = "geno_value") %>%
+#   dplyr::filter(geno_value != 0 &
+#                   !(interval %in% unique(interval_with_DP_rp2$interval))) %>%
+#   dplyr::group_by(interval, rp) %>%
+#   dplyr::summarise(pval = t.test(Estimate_transformed ~ geno)$p.value, .groups = "drop", var.equal = FALSE) %>%
+#   dplyr::mutate(pval_adjusted = p.adjust(pval,method="BH"))
+
+ttest_pval_separate_rp <- rbind.data.frame(ttest_pval_separate_rp, ttest_pval_rp1)
+  
+  #ttest_pval_rp2 %>%
+  # dplyr::full_join(ttest_pval_rp1)
+
+}}
   
 ### dplyr::group_by(interval, Sample) %>%
   # dplyr::mutate(value_inerval = DP * Estimate_transformed)%>%
@@ -707,18 +935,24 @@ ttest_pval <- table_for_fine_mapping_interval_content %>%
   # 
 ```
 
-
-
 ```{r plot interval p-val}
 
-interval_value_plot <- ttest_pval %>%
-  dplyr::full_join(interval_for_plotting) %>%
-  ggplot(aes( x= i.start, y = -log10(pval_adjusted))) + #value_inerval_tot
+interval_value_plot <-  ttest_pval_separate_rp %>% #ttest_pval
+  dplyr::filter(!is.na(rp)) %>%
+  dplyr::full_join(interval_for_plotting_rp_dp) %>% #interval_for_plotting
+  dplyr::full_join(interval_causal_variant_rp) %>%
+  ggplot(aes( x= i.start, y = -log10(pval_adjusted))) + #value_inerval_tot #i.start
   geom_point() + 
-  geom_vline(aes(xintercept = i.start[interval == a]), color = "red") +
-  geom_hline(yintercept = -log10(0.05), color = "darkgrey") +
+  # facet_wrap(~rp) + 
+  facet_grid(rp~dp) + 
+  # geom_vline(aes(xintercept = i.start[which(interval == a), ]), color = "red") +
+  # geom_vline(data = interval_value_plot %>%
+  #              dplyr::group_by(rp) %>%
+  #              dplyr::summarise(a_interval = i.start[interval == a]),  aes(group=rp, xintercept = i.start[interval == a]), color = "red") +
+  # geom_vline(aes(xintercept = a), color = "red") +
+  geom_hline(yintercept = -log10(0.05), color = "blue") +
   ylab("-log10(p-value) of the interval") +
-  xlab("Target Interval\n(quantile positions, bp)") +
+  xlab("Interval in \n(quantile positions, bp)") +
    theme(plot.background = element_blank()
                 ,legend.position = "top"
                 #,legend.direction="vertical"
