@@ -1,0 +1,120 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2870
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fnil\fcharset0 Menlo-Regular;\f1\fmodern\fcharset0 Courier;\f2\froman\fcharset0 Times-Roman;
+}
+{\colortbl;\red255\green255\blue255;\red64\green11\blue217;\red0\green0\blue0;\red158\green76\blue4;
+\red200\green20\blue201;\red46\green174\blue187;\red180\green36\blue25;\red0\green0\blue0;\red224\green228\blue9;
+}
+{\*\expandedcolortbl;;\cssrgb\c32309\c18666\c88229;\csgray\c0;\cspthree\c64443\c38839\c13138;
+\cssrgb\c83397\c23074\c82666;\cssrgb\c20199\c73241\c78251;\cssrgb\c76411\c21697\c12527;\cssrgb\c0\c0\c0;\cssrgb\c90000\c90000\c0;
+}
+\paperw11900\paperh16840\margl1440\margr1440\vieww21940\viewh13640\viewkind0
+\pard\tx560\tx1120\tx1680\tx2240\tx2800\tx3360\tx3920\tx4480\tx5040\tx5600\tx6160\tx6720\pardirnatural\partightenfactor0
+
+\f0\fs22 \cf2 \CocoaLigature0 #!/bin/bash\cf3 \
+\cf2 ###### Configuration SLURM #################################\cf3 \
+\cf2 # On d\'e9finit le nom du job\cf3 \
+\cf2 #SBATCH --job-name=GEA_full_VCF_culti\cf3 \
+\cf2 # On d\'e9finit le nombre de t\'e2ches\cf3 \
+\cf2 #SBATCH --ntasks=1\cf3 \
+\cf2 # On d\'e9finit la partition\cf3 \
+\cf2 #SBATCH -p highmem\cf3 \
+\cf2 # On d\'e9finit le n\'9cud\cf3 \
+\cf2 ####SBATCH --nodelist=node25\cf3 \
+\cf2 # On d\'e9finit le nombre de c\'9curs par t\'e2che\cf3 \
+\cf2 #SBATCH --cpus-per-task=18\cf3 \
+\cf2 #On d\'e9finit la m\'e9moire\cf3 \
+\cf2 ####SBATCH --mem=10G\cf3 \
+\cf2 # On d\'e9finit l'adresse mail\cf3 \
+\cf2 #SBATCH --mail-user=justine.drouault@ird.fr\cf3 \
+\cf2 # On d\'e9finit quand recevoir les mails\cf3 \
+\cf2 #SBATCH --mail-type=ALL\cf3 \
+\cf2 #############################################################\cf3 \
+\
+\
+\cf2 # Cr\'e9er un r\'e9pertoire personnel de travail sur le scratch\cf3 \
+\cf4 cd\cf3  /scratch\
+\cf4 mkdir\cf3  DROUAULT-\cf5 $SLURM_JOB_ID\cf3 \
+\cf4 cd\cf3  /scratch/DROUAULT-\cf5 $SLURM_JOB_ID\cf3 \
+\
+\cf6 WORK_DIR\cf3 =\cf4 "\cf7 /scratch/DROUAULT-\cf5 $SLURM_JOB_ID\cf4 "\cf3 \
+\
+\
+\cf2 # Charger les logiciels\cf3 \
+module purge\
+module load bioinfo-itrop\
+module load R/\cf7 4\cf3 .\cf7 5\cf3 .\cf7 1\cf3 \
+
+\f1\fs26 \cf0 \expnd0\expndtw0\kerning0
+\CocoaLigature1 \outl0\strokewidth0 \strokec8 \
+\pard\pardeftab720\partightenfactor0
+\cf0 \
+RMD="/projects/xxl/GEAPM/NILAS/script/Get_interval_size_with_addition_of_dp.Rmd\outl0\strokewidth0 "\outl0\strokewidth0 \strokec8 \'a0\
+###OUT="/projects/xxl/GEAPM/\outl0\strokewidth0 NILAS/\outl0\strokewidth0 \strokec8 analysis_results"\
+\
+# Your 4 CSV files\
+FILES=(\
+  "/projects/xxl/GEAPM/NILAS/data/ZmPR1_20261021median_pval_adjusted.txt\outl0\strokewidth0 "\outl0\strokewidth0 \strokec8 \'a0\
+  "\outl0\strokewidth0 /projects/xxl/GEAPM/NILAS/data/ZmPR2_20261021median_pval_adjusted.txt"\outl0\strokewidth0 \strokec8 \
+  "\outl0\strokewidth0 /projects/xxl/GEAPM/NILAS/data/ZmPR3_20261021median_pval_adjusted.txt"\outl0\strokewidth0 \strokec8 \
+  "\outl0\strokewidth0 /projects/xxl/GEAPM/NILAS/data/ZmPR4_20261021median_pval_adjusted.txt"\outl0\strokewidth0 \strokec8 \
+)\
+\
+mkdir -p "$OUT"\
+\
+# Outer loop: each CSV file\
+for file in "$\{FILES[@]\}"; do\
+\
+    dataset=$(basename "$file")\
+    echo "Starting: $dataset"\
+\
+    # Count data rows (excluding header)\
+    total_rows=$(($(wc -l < "$file") - 1))\
+\
+    # Inner loop: progressively increase subset size\
+    for n in $(seq 1 "$total_rows"); do\
+\
+        echo "Dataset=$dataset | Rows=$n/$total_rows"\
+\
+        Rscript -e '\
+          args <- commandArgs(trailingOnly = TRUE)\
+\
+          rmarkdown::render(\
+            input = args[1],\
+            params = list(\
+              input_file = args[2],\
+              n_rows = as.integer(args[3]),\
+              output_dir = args[4]\
+            ),\
+            output_file = sprintf("%s_rows_%05d.html",\
+                                  args[5],\
+                                  as.integer(args[3])),\
+            output_dir = args[4],\
+            quiet = TRUE\
+          )\
+        ' "$RMD" "$file" "$n" "$
+\f0\fs22 \cf6 \kerning1\expnd0\expndtw0 \CocoaLigature0 \outl0\strokewidth0 WORK_DIR
+\f1\fs26 \cf0 \expnd0\expndtw0\kerning0
+\CocoaLigature1 \outl0\strokewidth0 \strokec8 " "$dataset"\
+\
+    done\
+\
+    echo "Finished: $dataset"\
+done\
+\
+echo "All files completed."\
+\pard\pardeftab720\sa240\partightenfactor0
+
+\f2\fs24 \cf0 \
+\pard\tx560\tx1120\tx1680\tx2240\tx2800\tx3360\tx3920\tx4480\tx5040\tx5600\tx6160\tx6720\pardirnatural\partightenfactor0
+
+\f0\fs22 \cf2 \kerning1\expnd0\expndtw0 \CocoaLigature0 \outl0\strokewidth0 # R\'e9cup\'e9ration des r\'e9sultats\cf3 \
+\cf4 mkdir\cf3  \cf5 -p\cf3  \cf4 "\cf7 /projects/xxl/GEAPM/NI\cf4 LAS/data/resultats/\cf5 $(date +\cf4 "\cf7 %Y%m%d\cf4 "\cf5 )"\cf3 \
+\pard\tx560\tx1120\tx1680\tx2240\tx2800\tx3360\tx3920\tx4480\tx5040\tx5600\tx6160\tx6720\pardirnatural\partightenfactor0
+\cb9 scp\cb1  \cf5 -r\cf3  \cf4 "\cf5 $WORK_DIR\cf7 /\cf4 "\cf3  \cf4 "\cf7 /projects/xxl/GEAPM/NI\cf4 LAS/data/resultats/\cf5 $(date +\cf4 "\cf7 %Y%m%d\cf4 "\cf5 )"\cf3 \
+    \
+\pard\tx560\tx1120\tx1680\tx2240\tx2800\tx3360\tx3920\tx4480\tx5040\tx5600\tx6160\tx6720\pardirnatural\partightenfactor0
+\cf2 # Suppression des donn\'e9es sur le scratch\cf3 \
+\cf4 rm\cf3  \cf5 -rf\cf3  /scratch/DROUAULT-\cf5 $SLURM_JOB_ID
+\f2\fs24 \cf0 \expnd0\expndtw0\kerning0
+\CocoaLigature1 \outl0\strokewidth0 \strokec8 \
+}

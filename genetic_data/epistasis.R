@@ -3,6 +3,7 @@ library(nlme)
 library(patchwork)
 library(gridExtra)
 library(lme4)
+library(ggpmisc)
 
 
 
@@ -15,14 +16,14 @@ date_today <- gsub("-", "", date_today)
 
 ### ======= Create the path 
 
-root <- "~/Dropbox-SE Dropbox/Justine Drouault/inrae_jd/" #### replace by your path 
+root <- "~/Documents/Drouault_etal_paper2/01_paperdev/ATLAS/paper/"#"~/Dropbox-SE Dropbox/Justine Drouault/inrae_jd/" #### replace by your path 
 # root <- "~/Dropbox-SE Dropbox/Randall Wisser/inrae_jd/" #### replace by your path 
-haplotypes_path_blues <- paste0(root, "NILAS/main_folder/drouault/data/cleaned_data/blues/blues_day_dta_04Avr11/")
-genetic_data_save_path <- paste0(root, "/NILAS/main_folder/drouault/data/genotypic_data/NILs/")
-fig_phenotype <- paste0(root, "NILAS/main_folder/drouault/paper/Figures/phenotypic_data/")
-source_path <- paste0(root, "NILAS/main_folder/drouault/data/cleaned_data/from_mixed_model/")
-genetic_data_save_path <- paste0(root, "NILAS/main_folder/drouault/data/genotypic_data/NILs/")
-fig_genotype <-  paste0(root,"NILAS/main_folder/drouault/paper/Figures/genotypic_data/effect_genes_introgressionNB/")
+haplotypes_path_blues <- paste0(root, "data/cleaned_data/blues/blues_day_dta_04Avr11/")
+genetic_data_save_path <- paste0(root, "data/genotypic_data/NILs/")
+fig_phenotype <- paste0(root, "Figures/phenotypic_data/")
+source_path <- paste0(root, "data/cleaned_data/from_mixed_model/")
+genetic_data_save_path <- paste0(root, "data/genotypic_data/NILs/")
+fig_genotype <-  paste0(root,"Figures/genotypic_data/effect_genes_introgressionNB/")
 
 
 ### ======= Load data
@@ -130,9 +131,9 @@ distribution_plot
 
 ### intercept 
 distribution_plot_intercept <- haplotype_int %>%
-  # dplyr::mutate(rp = as.numeric(gsub(".*g[0-9]|i.*", "", NILs)),
-  #               dp = as.numeric(gsub(".*g|[0-9]i.*", "", NILs)), 
-  #               qtl = as.numeric(gsub(".*q|g.*", "", NILs))) %>%
+  dplyr::mutate(rp = as.numeric(gsub(".*g[0-9]|i.*", "", haplotype)),
+                dp = as.numeric(gsub(".*g|[0-9]i.*", "", haplotype)),
+                qtl = as.numeric(gsub(".*q|g.*", "", haplotype))) %>%
   dplyr::rename(gb = rp) %>%
   dplyr::mutate(gb = ifelse(gb == 1, "2369", "LH123hT"),
                 qtl = dplyr::recode(qtl, "1" = "ZmPR1" , "2" =  "ZmPR2", "3" =  "ZmPR3", "4" = "ZmPR4" ), 
@@ -169,6 +170,7 @@ distribution_plot_intercept <- distribution_plot_intercept+ theme(plot.backgroun
                                               ,axis.ticks.x = element_blank()
                                               ,plot.margin=unit(c(0.55,0.5,0.8,0.5), "cm")
 ) 
+
 
 distribution_plot_intercept
 
@@ -332,7 +334,7 @@ summary(total.lm)
 emm_ZmPR <- emmeans(total.lm, ~ total)  # Estimate marginal means for dp within each level of rp
 summary(emm_ZmPR)
 
-cld_1 <- cld(emm_ZmPR, Letters = letters)
+cld_1 <- lsmeans::cld(emm_ZmPR, Letters = letters)
 cld_df <- unnest(cld_1)
 
 ## Intercept
@@ -413,10 +415,15 @@ ggsave(paste0(fig_genotype, "fig_nbZmPR_introgressed","_", date_today,".pdf"),
                  labels = c("A", "B"),
                  ncol = 2, nrow = 1), width = 12, height = 5)
 
+haplotype_slope_single_intro <- haplotype_int_1 %>%
+  dplyr::filter(lines %in% unique(group1_NILs$entryid))
 
 group1_NILs_plot  <- haplotype_slope_single_intro %>%
+  dplyr::mutate(rp = as.numeric(gsub(".*g[0-9]|i.*", "", lines)),
+                dp = as.numeric(gsub(".*g|[0-9]i.*", "", lines)),
+                qtl = as.numeric(gsub(".*q|g.*", "", lines))) %>%
   dplyr::filter(rp == 2) %>%
-  dplyr::mutate(i = str_extract(haplotype, "i\\d+"), 
+  dplyr::mutate(i = str_extract(lines, "i\\d+"), 
                 i = str_extract(i, "\\d{2}")) %>%
   ggplot(aes(x = i, y = Estimate)) +
   geom_hline(yintercept = 4.51264) +
@@ -462,7 +469,8 @@ for (r in 1:2) {
       dplyr::filter(rp == 1 | rp == 2 ) %>%
       dplyr::filter( dp == 4 | dp ==  3) %>% 
       dplyr::filter(qtl == 4)
-      
+
+    library(stringr)      
     
 Q<- haplotype_slope%>%
   dplyr::mutate(rp = as.numeric(gsub(".*g[0-9]|i.*", "", haplotype)),
@@ -475,17 +483,19 @@ Q<- haplotype_slope%>%
   dplyr::mutate(i = str_extract(entryid2, "i\\d+"), 
                 i = str_extract(i, "\\d{2}"), 
                 Type = "haplotype", 
-                i = factor(i, levels = c("12", "11", "10", "09", "08", "07", "06", "05", "04", "03", "02", "01")),
-                marker = ifelse(entryid2 %in% haplotype_single_intro$entryid, "filtered", "not" ),
-                filtered = ifelse(marker == "filtered", "yes", "no"),
-                marker = ifelse(entryid2 %in% candidate_gene_coordinate_sub$entryid, "ok", "no"), 
-                marker = factor(marker, levels = c("no", "ok")), 
-                filtered = factor(filtered, levels = c("yes", "no"))) %>%
-  dplyr::full_join(NILAS_newid) %>% 
-  # dplyr::mutate(id_new = as.factor(id_new),
-  #               id_new = fct_rev(id_new)) %>%
+                i = factor(i, levels = c("12", "11", "10", "09", "08", "07", "06", "05", "04", "03", "02", "01"))) %>%
+                # filtered = ifelse(marker == "filtered", "yes", "no"),
+                # marker = ifelse(entryid2 %in% candidate_gene_coordinate_sub$entryid, "ok", "no"), 
+                # marker = factor(marker, levels = c("no", "ok")), 
+                # filtered = factor(filtered, levels = c("yes", "no"))) %>%
+  dplyr::full_join(NILAS_newid) %>%
+  dplyr::mutate(id_new = as.factor(id_new),
+                id_new = fct_rev(id_new)) %>%
+  dplyr::arrange(desc(id_new)) %>%
+  dplyr::mutate(entryid2 = fct_reorder(entryid2, desc(Estimate))) %>%                # marker = ifelse(entryid2 %in% haplotype_single_intro$entryid, "filtered", "not" ),
   # dplyr::full_join(ref_parent) %>%
-  ggplot(aes(x = (-id_new+49), y = Estimate)) + # xmin = id_new, xmax =  (id_new), ymin =Estimate - Std..Error, ymax = Estimate  + Std..Error)) +
+  ggplot(aes(x = Estimate , y = entryid2 )) + # xmin = id_new, xmax =  (id_new), ymin =Estimate - Std..Error, ymax = Estimate  + Std..Error)) +
+  geom_col(color = "black") + #aes(fill = marker, alpha = filtered)
   geom_hline(yintercept = 4.51264, linetype = "dashed") +
   geom_hline(yintercept = -4.51264, linetype = "dashed") + 
   geom_hline(yintercept = 0) + 
@@ -494,12 +504,11 @@ Q<- haplotype_slope%>%
   geom_errorbar( aes(x=-id_new+49, ymin=Estimate - Std..Error, ymax=Estimate + Std..Error), width=0.5, colour="black", alpha=0.5, size=0.8) +
   # geom_errorbarh() + 
   # Set limits
-  geom_col(color = "black", aes(fill = marker, alpha = filtered)) + coord_flip() +
   # geom_segment(aes(y = unique(rep(min(Estimate),48)), x = -id_new+49+0.5,
   #                  yend = unique(rep(max(Estimate),48)), xend = -id_new+49+0.5),
   #              colour="black") +
   geom_vline(aes(xintercept = -id_new+48+0.5), colour="grey", size=0.5) +
-  scale_fill_manual(values = c(Palette)) +
+  scale_fill_manual(values = c(cbPalette)) +
   scale_alpha_manual(values = c(1, 0.5)) +
   ylab("Haplotype effect \n on photoperiod sensitivity") +
   xlab("") + 
@@ -558,6 +567,7 @@ haplotype_slopes_single_intro_filtered <- haplotype_slopes_single_intro%>%
 
 model <- lm(Estimate ~ i * Type, data = haplotype_slopes_single_intro_filtered)
 summary(model)
+
 
 anova_result <- anova(model)
 print(anova_result)

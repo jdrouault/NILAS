@@ -15,16 +15,18 @@ cbPalette <- c("#000000","#004949","#009292","#ff6db6","#ffb6db",
                "#920000","#924900","#db6d00","#24ff24","#ffff6d")
 
 #### root <- ("~/Dropbox-SE Dropbox/Randall Wisser/inrae_jd/")
-root <- ("/Users/jdrouault/Dropbox-SE Dropbox/Justine Drouault/inrae_jd/")
+root <- ("/Users/lps-drouault/Documents/Drouault_etal_paper2/01_paperdev/ATLAS/paper/")
 
 #### paths 
-peak_overlap <-  paste0(root,"NILAS/main_folder/drouault/data/genotypic_data/peak_overlap/")
-haplotypes_path_blues <- paste0(root, "NILAS/main_folder/drouault/data/cleaned_data/blues/blues_dta_em/") 
-plot_path <- paste0(root, "NILAS/main_folder/drouault/plots/results/genotypic_data/") 
+peak_overlap <-  paste0(root,"data/genotypic_data/peak_overlap/")
+haplotypes_path_blues <- paste0(root, "data/cleaned_data/blues/blues_dta_em/") 
+plot_path <- paste0(root, "plots/results/genotypic_data/") 
 
 #### Download files 
 haplotype_effect <- read.csv(paste0(haplotypes_path_blues, "haplotypes_effect_slope_20230711.csv"), sep = "," , header=TRUE)
 overlapping_peak <- read.csv(paste0(peak_overlap, "20230801_overlapping_peak.csv"), sep = "," , header=TRUE)
+
+overlapping_peak <- overlapping_peak[-706,] # this row contains names of NILAs group 
 
 #### Merge peak overlap and PS phenotypic data 
 overlapping_peak <- overlapping_peak %>% ### technique de bourin à revoir quand j'aurai le fichier d'eloise 
