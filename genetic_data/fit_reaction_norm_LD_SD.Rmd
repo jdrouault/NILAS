@@ -1,0 +1,352 @@
+---
+title: "fit_reaction_norm_LD_SD"
+author: "justine_drouault"
+date: "2026-11-18"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+
+```{r echo = FALSE}
+rm(list = ls())
+Q <- NULL
+```
+
+```{r,}
+date_today <- Sys.Date()
+date_today <- gsub("-", "", date_today)
+```
+
+```{r Create the path }
+
+root <- "/Users/lps-drouault/Documents/Drouault_etal_paper2/01_paperdev/ATLAS/paper/" #### replace by your path 
+# root <- "~/Dropbox-SE Dropbox/Randall Wisser/inrae_jd/" #### replace by your path 
+haplotypes_path_blues <- paste0(root, "data/cleaned_data/blues/blues_day_dta_04Avr11/")
+genetic_data_save_path <- paste0(root, "data/genotypic_data/NILs/")
+fig_phenotype <- paste0(root, "Figures/phenotypic_data/")
+saving_path <- paste0(root, "cleaned_data/from_mixed_model/")
+file_supp_path <- paste0(root, "Files/")
+
+```
+
+```{r Load data }
+
+#The data used here are the DLs and Ttem-ant obtained in the script PRNT_blues_dta.Rmd
+
+## Haplotype data 
+haplotype_TT_flowering <- read.csv(paste0(haplotypes_path_blues, "dataset_lmer_regression_20240911.csv"), header = T) %>%
+  dplyr::filter(!grepl("q2g21i12",entryid2) & !grepl("q3g31i01",entryid2) ### filter the lines that have high level of heterozygosity
+                & !grepl("q2g12i04",entryid2) & 
+                  !grepl("q2g52i02",entryid2))
+
+## NILs data 
+regression_NILS <- read.csv(paste0(haplotypes_path_blues, "dataset_lmer_regression_NILs_20240921.csv"), header = T) %>%
+  dplyr::filter(!grepl("q2g21i12",entryid2) & !grepl("q3g31i01",entryid2) ### filter the lines that have high level of heterozygosity
+                & !grepl("q2g12i04",entryid2) & 
+                  !grepl("q2g52i02",entryid2))
+
+## NILs of group A
+groupA_NILs <- read.csv(paste0(genetic_data_save_path, "20240913Selected_NILs_after_filtration.csv"), header = T)%>% 
+dplyr::mutate(lines = gsub("s[0-9]p[0-9]r[0-9]$", "", Sample))
+
+## Parents data 
+regression_parents <- read.csv(paste0(haplotypes_path_blues, "dataset_lmer_regression_parents_20240921.csv"), header = T) %>%
+  dplyr::filter(!grepl("q2g21i12",entryid2) & !grepl("q3g31i01",entryid2) ### filter the lines that have high level of heterozygosity
+                & !grepl("q2g12i04",entryid2) & 
+                  !grepl("q2g52i02",entryid2))
+
+## NILs content (group A only)
+summary_qtl_insertion <- read.csv(paste0(genetic_data_save_path, "20240702Selected_NILs_after_filtration.csv"), header = T)  %>%
+dplyr::mutate(
+  across(zmpr1_cct:zmpr4_cacta, ~ as.numeric(.)),
+  qtl = as.character(qtl),
+  number_of_candidate = rowSums(
+    across(c(
+      zmpr1_cct, zmpr1_elf4,
+      zmpr2_zcn8, zmpr2_rap2.7,
+      zmpr3_conz1, zmpr3_cct,
+      zmpr4_cacta
+    ), ~ !is.na(.) & . != 0)
+  )
+)
+```
+
+
+```{r Fit the model for the haplotypes}
+
+# diff_gdd = haplotype effect anthesis measured in gdd
+# new_mean_daylength = daylength average in SD and LD with intercept SD on 0
+
+haplotype_TT_flowering$Parameters <- as.factor(haplotype_TT_flowering$Parameters)
+haplotype_TT_flowering$Parameters <- factor(haplotype_TT_flowering$Parameters, levels=rev(levels(haplotype_TT_flowering$Parameters)))
+haplotype_TT_flowering$DL <- as.numeric(as.factor(haplotype_TT_flowering$Parameters))
+haplotype_TT_flowering$DL_num <- haplotype_TT_flowering$new_mean_daylength
+#note, I did not allow free values for DL after noting the mean DLs were the same to the tenths 
+haplotype_TT_flowering$DL_num[which(haplotype_TT_flowering$DL_num>0)] <- 3.5
+
+## fixed effect model 
+fits <- lmList(diff_gdd ~ DL_num | entryid2, data=haplotype_TT_flowering, pool=TRUE, na.action=na.exclude)
+int <- as.data.frame(summary(fits)$coefficients[,,1])
+int <- cbind.data.frame(haplotype=rownames(int), int)
+
+rownames(int) <- 1:nrow(int)
+head(int)
+slp <- as.data.frame(summary(fits)$coefficients[,,2])
+slp <- cbind.data.frame(haplotype=rownames(slp), slp)
+rownames(slp) <- 1:nrow(slp)
+head(slp)
+
+#write.csv(int, paste0(saving_path, "haplotype_int", "_",date_today, ".csv"), row.names = F) 
+#write.csv(slp, paste0(saving_path, "haplotype_slope", "_",date_today, ".csv"), row.names = F) 
+
+```
+
+```{r summary of haplotype passing threshold}
+
+### Haplotype detected with statistical threshold 
+int$BH <- p.adjust(int$`Pr(>|t|)`, method="BH")
+count(int[which(int$BH<0.05),])
+count(int[which(int$BH<0.05 & int$Estimate <0),])
+
+slp$BH <- p.adjust(slp$`Pr(>|t|)`, method="BH")
+slp[which(slp$BH<0.05),]
+
+### Haplotype detected with biological threshold 
+slp$biological_threshold <- (1.96*slp$`Std. Error`)
+sup_biol <- slp$haplotype[which(slp$Estimate > (slp$biological_threshold))]
+inf_biol <- slp$haplotype[which(slp$Estimate < -(slp$biological_threshold))]
+biological_detected_haplotype_slope <- c(sup_biol, inf_biol)
+
+int$biological_threshold <- (1.96*int$`Std. Error`)
+sup_biol_int <- int$haplotype[which(int$Estimate > (int$biological_threshold))]
+inf_biol_int <- int$haplotype[which(int$Estimate < -(int$biological_threshold))]
+biological_detected_haplotype_int <- c(sup_biol_int, inf_biol_int)
+
+```
+
+```{r summary effect max-min of the halotype}
+
+haplotype_effect_on_int <- int %>% 
+  dplyr::mutate(rp = as.numeric(gsub(".*g[0-9]|i.*", "", haplotype)),
+                dp = as.numeric(gsub(".*g|[0-9]i.*", "", haplotype)), 
+                qtl = as.numeric(gsub(".*q|g.*", "", haplotype))) %>%
+  dplyr::group_by(rp) %>%
+  dplyr::summarise(min_int = min(Estimate, na.rm = T ), 
+                   max_int = max(Estimate, na.rm = T ))
+
+haplotype_effect_on_slope <- slp %>% 
+  dplyr::mutate(rp = as.numeric(gsub(".*g[0-9]|i.*", "", haplotype)),
+                dp = as.numeric(gsub(".*g|[0-9]i.*", "", haplotype)), 
+                qtl = as.numeric(gsub(".*q|g.*", "", haplotype))) %>%
+  dplyr::group_by(rp) %>%
+  dplyr::summarise(min_slope = min(Estimate, na.rm = T ), 
+                   max_slope = max(Estimate, na.rm = T ))
+
+
+```
+
+```{r plot histogram}
+
+slope_bio <- slp %>%
+  mutate(
+    biological_effect = Estimate > biological_threshold |
+      Estimate < -biological_threshold,
+    significant_stat = ifelse(BH < 0.05, "yes", "no")
+  ) %>%
+  ggplot(aes(x = Estimate)) +
+  ggpattern::geom_histogram_pattern(
+    aes(
+      fill = biological_effect,
+      pattern = significant_stat), 
+      position = "stack", 
+    binwidth = 0.5,
+    color = "black",
+    alpha = 0.8,
+    pattern_fill = "#56B4E9",
+    # pattern_colour = "#56B4E9",
+    pattern_density = 0.5,
+    pattern_spacing = 0.03,
+    pattern_angle = 45
+  ) +
+  scale_fill_manual(
+    values = c(
+      "FALSE" = "#868686FF",
+      "TRUE" = "#EFC000FF"
+    )
+  ) +
+  ggpattern::scale_pattern_manual(
+    values = c(
+      "yes" = "stripe",
+      "no" = "none"
+    )
+  ) +
+    theme_classic() +
+  theme(plot.background = element_blank(),
+        ,legend.position = "none"
+        ,legend.direction="vertical"
+        ,legend.key.size = unit(5, "cm")
+        ,legend.key.height = unit(2, 'cm') 
+        ,legend.key.width = unit(1, 'cm') 
+        ,legend.text = element_text(size = 14, face="bold")
+        ,aspect.ratio = 1
+        ,legend.title = element_text(colour="black", size=16, face="bold")
+        ,panel.grid.minor = element_blank()
+        ,panel.grid.major.x = element_line(colour="grey", size = 0.5, linetype=3)
+        ,panel.grid.major.y = element_line(colour="grey", size = 0.5, linetype=3)
+        ,panel.border = element_rect(colour="grey", size = 0.5, fill=NA)
+        ,panel.background = element_blank()
+        ,plot.title = element_text(face="bold")
+        ,axis.title.x = element_text(size=30, margin = margin(t=16), face="bold")
+        ,axis.text.x = element_text(size=30, angle = 90, vjust = 0.5, margin = margin(t=11))
+        ,axis.title.y = element_text(size=30, margin = margin(16), face="bold")
+        ,axis.text.y = element_text(size=30, hjust = 0.5, margin = margin(t=11))
+        ,axis.ticks.y = element_blank()
+        ,axis.ticks.x = element_blank()
+        ,strip.text = element_text(size = 30, face="bold"), 
+        plot.tag = element_text(size = 30), 
+        ,plot.margin=unit(c(0.55,0.5,0.8,0.5), "cm")) +
+  ylab("Count (square-root scale)") +
+  scale_y_sqrt() + 
+  labs(tag = "(A)")+
+  xlab("Haplotype effect \n on photoperiod sensitivity")
+
+
+
+
+intercept <- int %>%
+  mutate(
+    biological_effect = Estimate > biological_threshold |
+      Estimate < -biological_threshold,
+    significant_stat = ifelse(BH < 0.05, "yes", "no")
+  ) %>%
+  ggplot(aes(x = Estimate)) +
+  ggpattern::geom_histogram_pattern(
+    aes(
+      fill = biological_effect,
+      pattern = significant_stat), 
+    position = "stack", 
+    binwidth = 4,
+    color = "black",
+    alpha = 0.8,
+    pattern_fill = "#56B4E9",
+    pattern_density = 0.3,
+    pattern_spacing = 0.03,
+    pattern_angle = 45
+  ) +
+  scale_fill_manual(
+    values = c(
+      "FALSE" = "#868686FF",
+      "TRUE" = "#EFC000FF"
+    )
+  ) +
+  ggpattern::scale_pattern_manual(
+    values = c(
+      "yes" = "stripe",
+      "no" = "none"
+    )
+  ) +
+  theme_classic() +
+  theme(plot.background = element_blank(),
+        ,legend.position = "none"
+        ,legend.direction="vertical"
+        ,legend.key.size = unit(5, "cm")
+        ,legend.key.height = unit(2, 'cm') 
+        ,legend.key.width = unit(1, 'cm') 
+        ,legend.text = element_text(size = 14, face="bold")
+        ,aspect.ratio = 1
+        ,legend.title = element_text(colour="black", size=16, face="bold")
+        ,panel.grid.minor = element_blank()
+        ,panel.grid.major.x = element_line(colour="grey", size = 0.5, linetype=3)
+        ,panel.grid.major.y = element_line(colour="grey", size = 0.5, linetype=3)
+        ,panel.border = element_rect(colour="grey", size = 0.5, fill=NA)
+        ,panel.background = element_blank()
+        ,plot.title = element_text(face="bold")
+        ,axis.title.x = element_text(size=30, margin = margin(t=16), face="bold")
+        ,axis.text.x = element_text(size=30, angle = 90, vjust = 0.5, margin = margin(t=11))
+        ,axis.title.y = element_text(size=30, margin = margin(16), face="bold")
+        ,axis.text.y = element_text(size=30, hjust = 0.5, margin = margin(t=11))
+        ,axis.ticks.y = element_blank()
+        ,axis.ticks.x = element_blank()
+        ,strip.text = element_text(size = 30, face="bold"), 
+        plot.tag = element_text(size = 30), 
+        ,plot.margin=unit(c(0.55,0.5,0.8,0.5), "cm")) +
+  ylab("Count (square-root scale)") +
+  scale_y_sqrt() + 
+  labs(tag = "(B)")+
+  xlab(quote(bold(atop("Haplotype effect on", bold("flowering time" ~ bolditalic("per se"))))))
+
+
+
+
+multi_plot <- slope_bio + intercept + plot_layout(ncol = 2, nrow = 1, guides = 'keep') 
+multi_plot
+
+ggsave(file = paste0(fig_phenotype, date_today, "histogram_haplotype_effect_slope_intercept.pdf"),
+       multi_plot, width = 18, height = 18)
+
+```
+
+```{r summary content of NILAS lines with haplotypes detected}
+
+
+#### Check if the lines that were marked as significantly different have several intro or candidate gene
+### slope
+## statistics
+
+## Lines with a single ZmPR target region introgressed
+slp[which(slp$BH < 0.05), ]$haplotype[which(slp[which(slp$BH < 0.05), ]$haplotype %in% groupA_NILs$lines)]
+
+## From those lines which does not contain candidate gene in the haplotype region
+
+no_candidates_gene_lines <- summary_qtl_insertion %>%
+  dplyr::filter(number_of_candidate == 0)
+
+slp[which(slp$BH < 0.05), ]$haplotype[which((slp[which(slp$BH < 0.05), ]$haplotype %in% groupA_NILs$lines))] %in% no_candidates_gene_lines$entryid
+
+## Biological
+(biological_detected_haplotype_slope %in% groupA_NILs$lines) %in% no_candidates_gene_lines$entryid
+
+
+### intercept
+## statistics
+## Lines with a single ZmPR target region introgressed
+int[which(int$BH < 0.05), ]$haplotype[which(int[which(int$BH < 0.05), ]$haplotype %in% groupA_NILs$lines)]
+
+int[which(int$BH < 0.05), ]$haplotype[which((int[which(int$BH < 0.05), ]$haplotype %in% groupA_NILs$lines))] %in% no_candidates_gene_lines$entryid
+
+## Biological
+(biological_detected_haplotype_int %in% groupA_NILs$lines) %in% no_candidates_gene_lines$entryid
+
+### Table results 
+
+list_to_keep <- c(biological_detected_haplotype_int, int[which(int$BH < 0.05), ]$haplotype, slp[which(slp$BH < 0.05), ]$haplotype, biological_detected_haplotype_slope)
+
+result_table <- summary_qtl_insertion %>% 
+  dplyr::filter(entryid %in% list_to_keep) %>%
+  dplyr::select(entryid, Nb_ZmPR1:Nb_ZmPR4, zmpr1_cct:zmpr4_cacta, number_of_candidate) %>%
+  dplyr::rowwise() %>% 
+  dplyr::mutate(number_of_ZmPR_introgressed =  Nb_ZmPR1 +  Nb_ZmPR2 +  Nb_ZmPR3 + Nb_ZmPR4, 
+  potential_new_coding_region = ifelse((number_of_ZmPR_introgressed == 1 | number_of_ZmPR_introgressed == 0) & number_of_candidate == 0 , "yes", "no"), 
+  detection_method = ifelse(entryid %in% slp[which(slp$BH < 0.05), ]$haplotype | entryid %in% int[which(int$BH < 0.05), ]$haplotype, "statistical", "biological" ), 
+   detection_method = ifelse(detection_method == "statistical" & entryid  %in% biological_detected_haplotype_int,  "statistical & biological", detection_method), 
+  detection_method = ifelse(detection_method == "statistical" & entryid  %in% biological_detected_haplotype_slope,  "statistical & biological", detection_method),
+  phenotype = ifelse(entryid %in% slp[which(slp$BH < 0.05), ]$haplotype | entryid %in% biological_detected_haplotype_slope, "photoperiod sensitivity", "flowering time per se"), 
+  phenotype = ifelse(phenotype == "photoperiod sensitivity" & entryid  %in% biological_detected_haplotype_int, "photoperiod sensitivity & flowering time per se", phenotype), 
+  phenotype = ifelse(phenotype == "photoperiod sensitivity" & entryid  %in% int[which(int$BH < 0.05), ]$haplotype, "photoperiod sensitivity & flowering time per se", phenotype), 
+    phenotype = ifelse(phenotype == "flowering time per se" & entryid  %in% biological_detected_haplotype_slope, "photoperiod sensitivity & flowering time per se", phenotype),
+  phenotype = ifelse(phenotype == "flowering time per se" & entryid  %in% slp[which(slp$BH < 0.05), ]$haplotype, "photoperiod sensitivity & flowering time per se", phenotype)) %>%
+  dplyr::rename(number_of_candidate_genes = number_of_candidate)
+
+
+write.csv(
+  result_table,
+  file.path(genetic_data_save_path, paste0(date_today, "lines_detected_with_effect_PS_floperse.csv")),
+  row.names = TRUE
+)
+
+
+ 
+  
+```
+
