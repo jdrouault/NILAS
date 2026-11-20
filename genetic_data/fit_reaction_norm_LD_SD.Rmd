@@ -7,6 +7,11 @@ editor_options:
   chunk_output_type: console
 ---
 
+For each NILAS line, its corresponding backcross parent, and the donor parents, flowering time was decomposed into its temperature and photoperiod responses, corresponding to flowering time per se and photoperiod sensitivity, respectively, using a reaction norm approach as described in Drouault et al. (2024).
+
+For each NILAS line, the stage at which the plant was sensitive to photoperiod, expressed as the thermal time from emergence to tassel initiation (Tt em–TI), was assumed to be the same as that of its corresponding backcross parent. The Tt em–TI values, previously calculated in Drouault et al. (2024), were 288 GDD for LH123Ht and 283 GDD for 2369. It was assumed that the introgression of a single haplotype or QTL into the temperate genetic background would not significantly delay Tt em–TI.
+
+Due to a gap in the environmental photoperiod gradient between 12.3 and 14.1 hours (Fig. photoperiod_MET_nilaS), the reaction norm parameters were estimated using the long-day versus short-day (LD–SD) approach described in Drouault et al. (2024). Long-day (LD) and short-day (SD) environments were distinguished using the mean genotype-specific photoperiod threshold of the seven donor parents, which was 13.5 hours. A linear model was then fitted to estimate the reaction norm parameters, following Drouault et al. (2024).
 
 ```{r echo = FALSE}
 rm(list = ls())
@@ -16,6 +21,44 @@ Q <- NULL
 ```{r,}
 date_today <- Sys.Date()
 date_today <- gsub("-", "", date_today)
+```
+
+```{r install packages,  echo=TRUE, message=TRUE, results='hide'}
+install.packages(c(
+  "anyLib",
+  "data.table",
+  "dplyr",
+  "ggplot2",
+  "gridExtra",
+  "patchwork",
+  "plyr",
+  "reshape2",
+  "stringr", 
+  "forcats",
+  "ggpubr",
+  "stats", 
+  "ggforce"
+))
+```
+
+```{r load packages, echo=TRUE, message=TRUE, results='hide'}
+library(anyLib)
+anyLib(c("data.table",
+  "dplyr",
+  "ggplot2",
+  "gridExtra",
+  "patchwork",
+  "plyr",
+  "reshape2",
+  "stringr", 
+  "forcats", 
+  "ggpubr", 
+  "stats", 
+  "ggforce"))
+```
+
+```{r palette}
+cbPalette <- c("#999999", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7")
 ```
 
 ```{r Create the path }
@@ -148,7 +191,7 @@ haplotype_effect_on_slope <- slp %>%
 
 ```{r plot histogram}
 
-slope_bio <- slp %>%
+slope <- slp %>%
   mutate(
     biological_effect = Estimate > biological_threshold |
       Estimate < -biological_threshold,
@@ -210,8 +253,6 @@ slope_bio <- slp %>%
   scale_y_sqrt() + 
   labs(tag = "(A)")+
   xlab("Haplotype effect \n on photoperiod sensitivity")
-
-
 
 
 intercept <- int %>%
@@ -277,9 +318,7 @@ intercept <- int %>%
   xlab(quote(bold(atop("Haplotype effect on", bold("flowering time" ~ bolditalic("per se"))))))
 
 
-
-
-multi_plot <- slope_bio + intercept + plot_layout(ncol = 2, nrow = 1, guides = 'keep') 
+multi_plot <- slope + intercept + plot_layout(ncol = 2, nrow = 1, guides = 'keep') 
 multi_plot
 
 ggsave(file = paste0(fig_phenotype, date_today, "histogram_haplotype_effect_slope_intercept.pdf"),
@@ -291,51 +330,97 @@ ggsave(file = paste0(fig_phenotype, date_today, "histogram_haplotype_effect_slop
 
 
 #### Check if the lines that were marked as significantly different have several intro or candidate gene
-### slope
-## statistics
-
+### Slope
+## Statistics
 ## Lines with a single ZmPR target region introgressed
 slp[which(slp$BH < 0.05), ]$haplotype[which(slp[which(slp$BH < 0.05), ]$haplotype %in% groupA_NILs$lines)]
 
 ## From those lines which does not contain candidate gene in the haplotype region
-
 no_candidates_gene_lines <- summary_qtl_insertion %>%
   dplyr::filter(number_of_candidate == 0)
-
 slp[which(slp$BH < 0.05), ]$haplotype[which((slp[which(slp$BH < 0.05), ]$haplotype %in% groupA_NILs$lines))] %in% no_candidates_gene_lines$entryid
 
 ## Biological
 (biological_detected_haplotype_slope %in% groupA_NILs$lines) %in% no_candidates_gene_lines$entryid
 
 
-### intercept
+### Intercept
 ## statistics
 ## Lines with a single ZmPR target region introgressed
 int[which(int$BH < 0.05), ]$haplotype[which(int[which(int$BH < 0.05), ]$haplotype %in% groupA_NILs$lines)]
-
 int[which(int$BH < 0.05), ]$haplotype[which((int[which(int$BH < 0.05), ]$haplotype %in% groupA_NILs$lines))] %in% no_candidates_gene_lines$entryid
 
 ## Biological
 (biological_detected_haplotype_int %in% groupA_NILs$lines) %in% no_candidates_gene_lines$entryid
 
 ### Table results 
-
 list_to_keep <- c(biological_detected_haplotype_int, int[which(int$BH < 0.05), ]$haplotype, slp[which(slp$BH < 0.05), ]$haplotype, biological_detected_haplotype_slope)
 
 result_table <- summary_qtl_insertion %>% 
   dplyr::filter(entryid %in% list_to_keep) %>%
-  dplyr::select(entryid, Nb_ZmPR1:Nb_ZmPR4, zmpr1_cct:zmpr4_cacta, number_of_candidate) %>%
-  dplyr::rowwise() %>% 
-  dplyr::mutate(number_of_ZmPR_introgressed =  Nb_ZmPR1 +  Nb_ZmPR2 +  Nb_ZmPR3 + Nb_ZmPR4, 
-  potential_new_coding_region = ifelse((number_of_ZmPR_introgressed == 1 | number_of_ZmPR_introgressed == 0) & number_of_candidate == 0 , "yes", "no"), 
-  detection_method = ifelse(entryid %in% slp[which(slp$BH < 0.05), ]$haplotype | entryid %in% int[which(int$BH < 0.05), ]$haplotype, "statistical", "biological" ), 
-   detection_method = ifelse(detection_method == "statistical" & entryid  %in% biological_detected_haplotype_int,  "statistical & biological", detection_method), 
-  detection_method = ifelse(detection_method == "statistical" & entryid  %in% biological_detected_haplotype_slope,  "statistical & biological", detection_method),
-  phenotype = ifelse(entryid %in% slp[which(slp$BH < 0.05), ]$haplotype | entryid %in% biological_detected_haplotype_slope, "photoperiod sensitivity", "flowering time per se"), 
-  phenotype = ifelse(phenotype == "photoperiod sensitivity" & entryid  %in% biological_detected_haplotype_int, "photoperiod sensitivity & flowering time per se", phenotype), 
-  phenotype = ifelse(phenotype == "photoperiod sensitivity" & entryid  %in% int[which(int$BH < 0.05), ]$haplotype, "photoperiod sensitivity & flowering time per se", phenotype), 
-    phenotype = ifelse(phenotype == "flowering time per se" & entryid  %in% biological_detected_haplotype_slope, "photoperiod sensitivity & flowering time per se", phenotype),
-  phenotype = ifelse(phenotype == "flowering time per se" & entryid  %in% slp[which(slp$BH < 0.05), ]$haplotype, "photoperiod sensitivity & flowering time per se", phenotype)) %>%
+  dplyr::select(entryid,
+                Nb_ZmPR1:Nb_ZmPR4,
+                zmpr1_cct:zmpr4_cacta,
+                number_of_candidate) %>%
+  dplyr::rowwise() %>%
+  dplyr::mutate(
+    number_of_ZmPR_introgressed =  Nb_ZmPR1 +  Nb_ZmPR2 +  Nb_ZmPR3 + Nb_ZmPR4,
+    potential_new_coding_region = ifelse((
+      number_of_ZmPR_introgressed == 1 |
+        number_of_ZmPR_introgressed == 0
+    ) & number_of_candidate == 0 ,
+    "yes",
+    "no"
+    ),
+    detection_method = ifelse(
+      entryid %in% slp[which(slp$BH < 0.05), ]$haplotype |
+        entryid %in% int[which(int$BH < 0.05), ]$haplotype,
+      "statistical",
+      "biological"
+    ),
+    detection_method = ifelse(
+      detection_method == "statistical" &
+        entryid  %in% biological_detected_haplotype_int,
+      "statistical & biological",
+      detection_method
+    ),
+    detection_method = ifelse(
+      detection_method == "statistical" &
+        entryid  %in% biological_detected_haplotype_slope,
+      "statistical & biological",
+      detection_method
+    ),
+    phenotype = ifelse(
+      entryid %in% slp[which(slp$BH < 0.05), ]$haplotype |
+        entryid %in% biological_detected_haplotype_slope,
+      "photoperiod sensitivity",
+      "flowering time per se"
+    ),
+    phenotype = ifelse(
+      phenotype == "photoperiod sensitivity" &
+        entryid  %in% biological_detected_haplotype_int,
+      "photoperiod sensitivity & flowering time per se",
+      phenotype
+    ),
+    phenotype = ifelse(
+      phenotype == "photoperiod sensitivity" &
+        entryid  %in% int[which(int$BH < 0.05), ]$haplotype,
+      "photoperiod sensitivity & flowering time per se",
+      phenotype
+    ),
+    phenotype = ifelse(
+      phenotype == "flowering time per se" &
+        entryid  %in% biological_detected_haplotype_slope,
+      "photoperiod sensitivity & flowering time per se",
+      phenotype
+    ),
+    phenotype = ifelse(
+      phenotype == "flowering time per se" &
+        entryid  %in% slp[which(slp$BH < 0.05), ]$haplotype,
+      "photoperiod sensitivity & flowering time per se",
+      phenotype
+    )
+  ) %>%
   dplyr::rename(number_of_candidate_genes = number_of_candidate)
 
 
@@ -345,8 +430,5 @@ write.csv(
   row.names = TRUE
 )
 
-
- 
-  
 ```
 
